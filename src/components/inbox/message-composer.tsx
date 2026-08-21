@@ -118,6 +118,12 @@ interface MessageComposerProps {
   onOpenTemplates: () => void;
   replyTo?: ReplyDraft | null;
   onClearReply?: () => void;
+  /** True when this conversation is a WhatsApp group/community/channel
+   *  "contact" (migration 047). Outbound sending to these chats isn't
+   *  wired up in uazapi-api.ts's sendText/sendMedia yet, so the composer
+   *  is fully disabled and shows an explanatory hint instead of the
+   *  normal 24h-window messaging. */
+  groupChat?: boolean;
 }
 
 function formatDuration(seconds: number): string {
@@ -140,6 +146,7 @@ export function MessageComposer({
   onOpenTemplates,
   replyTo,
   onClearReply,
+  groupChat = false,
 }: MessageComposerProps) {
   const t = useTranslations("Inbox.composer");
 
@@ -190,7 +197,8 @@ export function MessageComposer({
   const canSend = useCan("send-messages");
   const readOnly = !canSend;
   // Media (like free-form text) is only allowed inside the 24h window.
-  const inputsDisabled = readOnly || sessionExpired;
+  // Group/community/channel chats can't send outbound at all yet.
+  const inputsDisabled = readOnly || sessionExpired || groupChat;
 
   const clearTimer = useCallback(() => {
     if (timerRef.current !== null) {
@@ -222,7 +230,7 @@ export function MessageComposer({
 
   const handleSend = useCallback(async () => {
     const trimmed = text.trim();
-    if (!trimmed || sending || sessionExpired) return;
+    if (!trimmed || sending || sessionExpired || groupChat) return;
 
     setSending(true);
     try {
@@ -234,7 +242,7 @@ export function MessageComposer({
     } finally {
       setSending(false);
     }
-  }, [text, sending, sessionExpired, onSend, replyTo?.id]);
+  }, [text, sending, sessionExpired, groupChat, onSend, replyTo?.id]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -269,15 +277,15 @@ export function MessageComposer({
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         if (data.code === "ai_not_configured") {
-          toast.error("AI isn't set up yet — enable it in Settings → AI Assistant.");
+          toast.error("A IA ainda não foi configurada — ative-a em Configurações → Assistente de IA.");
         } else {
-          toast.error(data.error ?? "Couldn't draft a reply.");
+          toast.error(data.error ?? "Não foi possível gerar uma resposta.");
         }
         return;
       }
       const draftText = typeof data.draft === "string" ? data.draft.trim() : "";
       if (!draftText) {
-        toast.error("The assistant didn't return a reply.");
+        toast.error("O assistente não retornou uma resposta.");
         return;
       }
       setText(draftText);
@@ -292,7 +300,7 @@ export function MessageComposer({
         }
       });
     } catch {
-      toast.error("Couldn't reach the AI assistant.");
+      toast.error("Não foi possível conectar ao assistente de IA.");
     } finally {
       setDrafting(false);
     }
@@ -390,7 +398,7 @@ export function MessageComposer({
       const max = MEDIA_MAX_BYTES_BY_KIND[kind];
       if (file.size > max) {
         toast.error(
-          `File is ${(file.size / 1024 / 1024).toFixed(1)} MB — ${kind} limit is ${Math.round(
+          `O arquivo tem ${(file.size / 1024 / 1024).toFixed(1)} MB — o limite para ${kind} é ${Math.round(
             max / 1024 / 1024,
           )} MB.`,
         );
@@ -403,7 +411,7 @@ export function MessageComposer({
         removeStaged(draftRef.current?.path);
         setDraft({ kind, mediaUrl: publicUrl, path, filename: file.name, caption: "" });
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Upload failed.");
+        toast.error(err instanceof Error ? err.message : "Falha no envio do arquivo.");
       } finally {
         setBusy(false);
       }
@@ -431,7 +439,7 @@ export function MessageComposer({
       });
       if (file.size === 0) return; // cancelled / empty take
       if (file.size > MEDIA_MAX_BYTES_BY_KIND.audio) {
-        toast.error("Recording is too long (over 16 MB).");
+        toast.error("A gravação é muito longa (mais de 16 MB).");
         return;
       }
       setBusy(true);
@@ -440,7 +448,7 @@ export function MessageComposer({
         removeStaged(draftRef.current?.path);
         setDraft({ kind: "audio", mediaUrl: publicUrl, path, filename: file.name, caption: "" });
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Upload failed.");
+        toast.error(err instanceof Error ? err.message : "Falha no envio do arquivo.");
       } finally {
         setBusy(false);
       }
@@ -451,7 +459,7 @@ export function MessageComposer({
   const startRecording = useCallback(async () => {
     if (inputsDisabled || busy || recording) return;
     if (!navigator.mediaDevices?.getUserMedia || typeof AudioContext === "undefined") {
-      toast.error("Voice recording isn't supported in this browser.");
+      toast.error("A gravação de voz não é compatível com este navegador.");
       return;
     }
     try {
@@ -478,7 +486,7 @@ export function MessageComposer({
     } catch {
       void recorderRef.current?.stop().catch(() => {});
       recorderRef.current = null;
-      toast.error("Microphone access denied or unavailable.");
+      toast.error("Acesso ao microfone negado ou indisponível.");
     }
   }, [inputsDisabled, busy, recording, finalizeRecording]);
 
@@ -546,21 +554,27 @@ export function MessageComposer({
           />
         </div>
       )}
-      {sessionExpired && (
-        <div className="mb-2 flex items-center justify-between rounded-lg bg-amber-500/10 px-3 py-2">
-          <p className="text-xs text-amber-400">
-            {t("sessionExpiredHint")}
-          </p>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 text-xs text-amber-400 hover:text-amber-300"
-            onClick={onOpenTemplates}
-          >
-            <LayoutTemplate className="mr-1 h-3 w-3" />
-            {t("templates")}
-          </Button>
+      {groupChat ? (
+        <div className="mb-2 rounded-lg bg-amber-500/10 px-3 py-2">
+          <p className="text-xs text-amber-400">{t("groupSendUnsupportedHint")}</p>
         </div>
+      ) : (
+        sessionExpired && (
+          <div className="mb-2 flex items-center justify-between rounded-lg bg-amber-500/10 px-3 py-2">
+            <p className="text-xs text-amber-400">
+              {t("sessionExpiredHint")}
+            </p>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs text-amber-400 hover:text-amber-300"
+              onClick={onOpenTemplates}
+            >
+              <LayoutTemplate className="mr-1 h-3 w-3" />
+              {t("templates")}
+            </Button>
+          </div>
+        )
       )}
 
       {/* Hidden file inputs driven by the attach menu. */}
@@ -732,21 +746,29 @@ export function MessageComposer({
             onChange={handleChange}
             onKeyDown={handleKeyDown}
             placeholder={
-              readOnly
-                ? t("readOnlyPlaceholder")
-                : sessionExpired
-                  ? t("sessionExpiredPlaceholder")
-                  : t("typeMessagePlaceholder")
+              groupChat
+                ? t("groupSendUnsupportedHint")
+                : readOnly
+                  ? t("readOnlyPlaceholder")
+                  : sessionExpired
+                    ? t("sessionExpiredPlaceholder")
+                    : t("typeMessagePlaceholder")
             }
-            disabled={sessionExpired || readOnly}
+            disabled={sessionExpired || readOnly || groupChat}
             rows={1}
             // Textarea keeps its own inline title — the GatedButton
             // wrapping pattern doesn't apply to non-button inputs.
             // The placeholder text also surfaces the read-only state.
-            title={readOnly ? t("readOnlyTitle") : undefined}
+            title={
+              groupChat
+                ? t("groupSendUnsupportedHint")
+                : readOnly
+                  ? t("readOnlyTitle")
+                  : undefined
+            }
             className={cn(
               "flex-1 resize-none rounded-xl border border-border bg-muted px-4 py-2.5 text-sm text-foreground placeholder-muted-foreground outline-none transition-colors focus:border-primary/50",
-              (sessionExpired || readOnly) && "cursor-not-allowed opacity-50"
+              (sessionExpired || readOnly || groupChat) && "cursor-not-allowed opacity-50"
             )}
           />
 
@@ -754,7 +776,7 @@ export function MessageComposer({
             size="sm"
             canAct={!readOnly}
             gateReason="send messages"
-            disabled={!text.trim() || sessionExpired || sending}
+            disabled={!text.trim() || sessionExpired || sending || groupChat}
             onClick={handleSend}
             className="h-9 w-9 shrink-0 bg-primary p-0 hover:bg-primary/90 disabled:opacity-40"
           >

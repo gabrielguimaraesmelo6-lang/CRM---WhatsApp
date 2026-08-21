@@ -6,6 +6,7 @@ import Script from "next/script";
 import "./globals.css";
 import { ThemeProvider } from "@/hooks/use-theme";
 import { ThemedToaster } from "@/components/themed-toaster";
+import { ChunkErrorListener } from "@/components/chunk-error-listener";
 import {
   DEFAULT_MODE,
   DEFAULT_THEME,
@@ -22,8 +23,8 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   title: {
-    default: "wacrm",
-    template: "%s — wacrm",
+    default: "Propulse CRM",
+    template: "%s — Propulse CRM",
   },
   description: "Self-hostable CRM template for WhatsApp.",
   robots: {
@@ -110,6 +111,7 @@ export default async function RootLayout({
       <body className="min-h-full bg-background text-foreground font-sans">
         <NextIntlClientProvider messages={messages} locale={locale}>
           <ThemeProvider>
+            <ChunkErrorListener />
             {children}
             <ThemedToaster />
           </ThemeProvider>

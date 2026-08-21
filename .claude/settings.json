@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(*)",
+      "WebFetch(domain:developer.z-api.io)",
+      "WebFetch(domain:z-api.io)",
+      "WebFetch(domain:*.z-api.io)",
+      "WebFetch(domain:*.uazapi.com)",
+      "WebFetch(domain:docs.uazapi.dev)",
+      "WebFetch(domain:supabase.com)",
+      "WebFetch(domain:vercel.com)",
+      "WebSearch",
+      "Edit",
+      "Write",
+      "Read"
+    ],
+    "deny": [
+      "Bash(git push*)",
+      "Bash(rm -rf /*)",
+      "Bash(rm -rf ~*)",
+      "Bash(rm -rf .*)",
+      "Bash(git reset --hard*)",
+      "Bash(git clean -f*)",
+      "Bash(git clean -d*)",
+      "Bash(vercel env add*)",
+      "Bash(vercel env rm*)",
+      "Bash(vercel remove*)",
+      "Bash(vercel project rm*)",
+      "Bash(supabase db reset*)",
+      "Bash(supabase projects delete*)",
+      "Bash(curl * -d *password*)",
+      "Bash(curl * -d *token*)"
+    ]
+  }
+}

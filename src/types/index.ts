@@ -57,8 +57,85 @@ export interface Account {
   name: string;
   /** auth.users.id of the immutable owner. */
   owner_user_id: string;
+  /** Set when this account belongs to a multi-account organization (migration 041). */
+  organization_id?: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/**
+ * A store + its linked seller accounts (migration 041). Only ever
+ * resolved for the organization's owner_account_id's own 'owner' —
+ * see is_organization_owner() in 041_organizations.sql.
+ */
+export interface Organization {
+  id: string;
+  name: string;
+  owner_account_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/** 'suspended' blocks read+write access for every member account (migration 042). */
+export type OrganizationStatus = 'active' | 'suspended';
+
+/**
+ * Where Asaas billing (not wired up yet — see src/lib/billing/README.md)
+ * will report an organization's payment state. Purely informational
+ * today: nothing reads this to gate access. `organizations.status`
+ * above remains the only column that does that.
+ */
+export type BillingStatus = 'trial' | 'active' | 'past_due' | 'canceled';
+
+/** One row in the platform admin panel's organization list (/painel-a17c94fe2b6d). */
+export interface PlatformOrganization {
+  id: string;
+  name: string;
+  status: OrganizationStatus;
+  billingStatus: BillingStatus;
+  createdAt: string;
+  /** The store owner's email — null if the auth lookup failed. */
+  ownerEmail: string | null;
+  /** Linked seller/sector accounts, excluding the store's own account. */
+  sellerCount: number;
+}
+
+/** One account (owner or seller) as shown on the store-detail page (/painel-a17c94fe2b6d/lojas/[id]). */
+export interface PlatformAccountDetail {
+  accountId: string;
+  userId: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  joinedAt: string;
+  inviteStatus: 'accepted' | 'pending';
+}
+
+/** GET /api/platform/organizations/[id] response. */
+export interface PlatformOrganizationDetail {
+  organization: {
+    id: string;
+    name: string;
+    status: OrganizationStatus;
+    billingStatus: BillingStatus;
+    createdAt: string;
+  };
+  owner: PlatformAccountDetail | null;
+  sellers: PlatformAccountDetail[];
+}
+
+/** One row in the consolidated-view account picker. */
+export interface OrganizationAccount {
+  id: string;
+  name: string;
+  /** True for the organization's own store account. */
+  isOwnerAccount: boolean;
+  /** The account owner's email — null if the auth lookup failed. */
+  email: string | null;
+  /** 'pending' until the invited seller has signed in at least once. */
+  inviteStatus: 'accepted' | 'pending';
+  /** When this account was linked to the organization. */
+  joinedAt: string;
 }
 
 /**
@@ -110,6 +187,16 @@ export interface Contact {
   avatar_url?: string;
   created_at: string;
   updated_at: string;
+  /**
+   * 'individual' (default, real 1:1 customer) | 'group' | 'community'
+   * | 'channel' (migration 047). A group/community/channel "contact"
+   * represents the chat itself, not a person — `phone` holds its
+   * WhatsApp id rather than a real number, and `name` is the chat's
+   * own name (e.g. a group's subject), not a person's. The Inbox
+   * filters these into their own "Groups" view (conversation-list.tsx)
+   * instead of mixing them with real contacts.
+   */
+  kind?: 'individual' | 'group' | 'community' | 'channel';
   /** Hydrated by queries that embed `contact_tags(tags(*))` (e.g. the
    *  Inbox conversation list, for tag filtering). Absent otherwise. */
   tags?: Tag[];

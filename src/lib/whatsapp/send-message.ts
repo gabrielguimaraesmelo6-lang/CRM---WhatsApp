@@ -20,30 +20,24 @@
 // ============================================================
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { after } from 'next/server';
 
-import {
-  sendTextMessage,
-  sendTemplateMessage,
-  sendMediaMessage,
-  sendInteractiveButtons,
-  sendInteractiveList,
-  type MediaKind,
-} from '@/lib/whatsapp/meta-api';
+import type { MediaKind } from '@/lib/whatsapp/meta-api';
 import {
   validateInteractivePayload,
   interactivePayloadPreviewText,
   type InteractiveMessagePayload,
 } from '@/lib/whatsapp/interactive';
-import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption';
 import { supabaseAdmin } from '@/lib/flows/admin-client';
-import {
-  sanitizePhoneForMeta,
-  isValidE164,
-  phoneVariants,
-  isRecipientNotAllowedError,
-} from '@/lib/whatsapp/phone-utils';
+import { sanitizePhoneForMeta, isValidE164 } from '@/lib/whatsapp/phone-utils';
 import type { MessageTemplate } from '@/types';
 import { isMessageTemplate } from '@/lib/whatsapp/template-row-guard';
+import {
+  getProviderForAccount,
+  sendWithPhoneRetry,
+  WhatsAppNotConfiguredError,
+} from '@/lib/whatsapp/send-core';
+import { isMetaProvider } from '@/lib/whatsapp/provider-types';
 
 export const MEDIA_KINDS = ['image', 'video', 'document', 'audio'] as const;
 export const VALID_MESSAGE_TYPES = [
@@ -247,37 +241,17 @@ export async function sendMessageToConversation(
     );
   }
 
-  // WhatsApp config, account-scoped.
-  const { data: config, error: configError } = await db
-    .from('whatsapp_config')
-    .select('*')
-    .eq('account_id', accountId)
-    .single();
-
-  if (configError || !config) {
-    throw new SendMessageError(
-      'whatsapp_not_configured',
-      'WhatsApp not configured. Please set up your WhatsApp integration first.',
-      400
-    );
-  }
-
-  const accessToken = decrypt(config.access_token);
-
-  // Self-heal legacy CBC ciphertexts. Fire-and-forget; idempotent.
-  if (isLegacyFormat(config.access_token)) {
-    void db
-      .from('whatsapp_config')
-      .update({ access_token: encrypt(accessToken) })
-      .eq('id', config.id)
-      .then(({ error }: { error: { message: string } | null }) => {
-        if (error) {
-          console.warn(
-            '[send-message] access_token GCM upgrade failed:',
-            error.message
-          );
-        }
-      });
+  // WhatsApp provider, account-scoped. Resolves + decrypts whichever
+  // credential set (Meta or uazapi) this account uses and self-heals
+  // legacy CBC ciphertexts to GCM in place — see send-core.ts.
+  let provider;
+  try {
+    provider = await getProviderForAccount(db, accountId);
+  } catch (err) {
+    if (err instanceof WhatsAppNotConfiguredError) {
+      throw new SendMessageError('whatsapp_not_configured', err.message, 400);
+    }
+    throw err;
   }
 
   // Resolve the reply target to its Meta message_id. The parent must
@@ -331,9 +305,14 @@ export async function sendMessageToConversation(
 
   const attempt = async (phone: string): Promise<string> => {
     if (messageType === 'template') {
-      const result = await sendTemplateMessage({
-        phoneNumberId: config.phone_number_id,
-        accessToken,
+      if (!isMetaProvider(provider)) {
+        throw new SendMessageError(
+          'provider_not_supported',
+          'Message templates are only available with the Meta provider.',
+          400
+        );
+      }
+      const result = await provider.sendTemplate({
         to: phone,
         templateName: templateName!,
         language: templateLanguage || 'en_US',
@@ -345,9 +324,7 @@ export async function sendMessageToConversation(
       return result.messageId;
     }
     if (isMediaKind) {
-      const result = await sendMediaMessage({
-        phoneNumberId: config.phone_number_id,
-        accessToken,
+      const result = await provider.sendMedia({
         to: phone,
         kind: messageType as MediaKind,
         link: mediaUrl!,
@@ -360,9 +337,7 @@ export async function sendMessageToConversation(
     if (messageType === 'interactive') {
       const p = interactivePayload!;
       if (p.kind === 'buttons') {
-        const result = await sendInteractiveButtons({
-          phoneNumberId: config.phone_number_id,
-          accessToken,
+        const result = await provider.sendInteractiveButtons({
           to: phone,
           bodyText: p.body,
           headerText: p.header || undefined,
@@ -372,9 +347,7 @@ export async function sendMessageToConversation(
         });
         return result.messageId;
       }
-      const result = await sendInteractiveList({
-        phoneNumberId: config.phone_number_id,
-        accessToken,
+      const result = await provider.sendInteractiveList({
         to: phone,
         bodyText: p.body,
         buttonLabel: p.button_label,
@@ -385,9 +358,7 @@ export async function sendMessageToConversation(
       });
       return result.messageId;
     }
-    const result = await sendTextMessage({
-      phoneNumberId: config.phone_number_id,
-      accessToken,
+    const result = await provider.sendText({
       to: phone,
       text: contentText!,
       contextMessageId,
@@ -395,49 +366,24 @@ export async function sendMessageToConversation(
     return result.messageId;
   };
 
-  // Send via Meta — retry across phone-number variants if Meta rejects
-  // with "recipient not in allowed list"; persist a working variant
-  // back to the contact so the next send goes straight through.
+  // Send via the account's provider — retry across phone-number
+  // variants if it rejects with "recipient not in allowed list";
+  // persist a working variant back to the contact so the next send
+  // goes straight through.
   let waMessageId = '';
   let workingPhone = sanitizedPhone;
   try {
-    const variants = phoneVariants(sanitizedPhone);
-    let lastError: unknown = null;
-
-    for (const variant of variants) {
-      try {
-        waMessageId = await attempt(variant);
-        workingPhone = variant;
-        lastError = null;
-        break;
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        if (!isRecipientNotAllowedError(message)) {
-          throw err;
-        }
-        lastError = err;
-        console.warn(
-          `[send-message] variant "${variant}" rejected by Meta, trying next…`
-        );
-      }
-    }
-
-    if (lastError) throw lastError;
+    const { result, workingPhone: wp } = await sendWithPhoneRetry(
+      sanitizedPhone,
+      attempt
+    );
+    waMessageId = result;
+    workingPhone = wp;
   } catch (err) {
     const message =
-      err instanceof Error ? err.message : 'Unknown Meta API error';
-    console.error('[send-message] Meta send failed for all variants:', message);
+      err instanceof Error ? err.message : 'Unknown WhatsApp API error';
+    console.error('[send-message] send failed for all variants:', message);
     throw new SendMessageError('meta_error', `Meta API error: ${message}`, 502);
-  }
-
-  if (workingPhone !== sanitizedPhone) {
-    console.log(
-      `[send-message] Auto-corrected contact phone: ${sanitizedPhone} → ${workingPhone}`
-    );
-    await db
-      .from('contacts')
-      .update({ phone: workingPhone })
-      .eq('id', contact.id);
   }
 
   // Persist the sent message. Field names MUST match the messages
@@ -475,42 +421,59 @@ export async function sendMessageToConversation(
     );
   }
 
-  const lastMessageText =
-    messageType === 'interactive'
-      ? interactivePayloadPreviewText(interactivePayload!)
-      : contentText || `[${messageType}]`;
-
-  await db
-    .from('conversations')
-    .update({
-      last_message_text: lastMessageText,
-      last_message_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', conversationId);
-
-  // Pause any active Flow run for this contact — the agent stepping in
-  // is the strongest "yield, human is here" signal. Best-effort.
-  try {
-    const { error: pauseErr } = await supabaseAdmin()
-      .from('flow_runs')
-      .update({
-        status: 'paused_by_agent',
-        ended_at: new Date().toISOString(),
-        end_reason: 'agent_replied',
-      })
-      .eq('account_id', accountId)
-      .eq('contact_id', contact.id)
-      .eq('status', 'active');
-    if (pauseErr) {
-      console.error('[flows] pause-on-agent-send failed:', pauseErr.message);
+  // Everything below this point is bookkeeping that doesn't change
+  // what's returned to the caller — deferred to run after the response
+  // is already on the wire, same `after()` pattern the inbound webhook
+  // routes use, so the caller isn't stuck waiting on three more DB
+  // round-trips once the (already slow) WhatsApp API call is done.
+  after(async () => {
+    if (workingPhone !== sanitizedPhone) {
+      console.log(
+        `[send-message] Auto-corrected contact phone: ${sanitizedPhone} → ${workingPhone}`
+      );
+      await db
+        .from('contacts')
+        .update({ phone: workingPhone })
+        .eq('id', contact.id);
     }
-  } catch (err) {
-    console.error(
-      '[flows] pause-on-agent-send threw:',
-      err instanceof Error ? err.message : err
-    );
-  }
+
+    const lastMessageText =
+      messageType === 'interactive'
+        ? interactivePayloadPreviewText(interactivePayload!)
+        : contentText || `[${messageType}]`;
+
+    await db
+      .from('conversations')
+      .update({
+        last_message_text: lastMessageText,
+        last_message_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', conversationId);
+
+    // Pause any active Flow run for this contact — the agent stepping
+    // in is the strongest "yield, human is here" signal. Best-effort.
+    try {
+      const { error: pauseErr } = await supabaseAdmin()
+        .from('flow_runs')
+        .update({
+          status: 'paused_by_agent',
+          ended_at: new Date().toISOString(),
+          end_reason: 'agent_replied',
+        })
+        .eq('account_id', accountId)
+        .eq('contact_id', contact.id)
+        .eq('status', 'active');
+      if (pauseErr) {
+        console.error('[flows] pause-on-agent-send failed:', pauseErr.message);
+      }
+    } catch (err) {
+      console.error(
+        '[flows] pause-on-agent-send threw:',
+        err instanceof Error ? err.message : err
+      );
+    }
+  });
 
   return { messageId: messageRecord.id, whatsappMessageId: waMessageId };
 }
