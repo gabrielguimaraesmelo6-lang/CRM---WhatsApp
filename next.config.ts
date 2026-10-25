@@ -25,7 +25,8 @@ const SECURITY_HEADERS = [
     value: "max-age=63072000; includeSubDomains; preload",
   },
   { key: "X-Content-Type-Options", value: "nosniff" },
-  { key: "X-Frame-Options", value: "DENY" },
+  // Só o Sistema iBox (*.crmwga.com) pode abrir o CRM por dentro; qualquer outro site continua bloqueado.
+  { key: "Content-Security-Policy", value: "frame-ancestors 'self' https://crmwga.com https://www.crmwga.com https://*.crmwga.com" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   {
     // Microphone is allowed for same-origin (`self`) so the inbox
@@ -56,7 +57,7 @@ const SECURITY_HEADERS = [
       // Supabase REST + realtime (WSS). All Meta API calls happen
       // server-side, so graph.facebook.com does not belong here.
       "connect-src 'self' https://*.supabase.co wss://*.supabase.co",
-      "frame-ancestors 'none'",
+      "frame-ancestors 'self' https://crmwga.com https://www.crmwga.com https://*.crmwga.com",
       "base-uri 'self'",
       "form-action 'self'",
     ].join("; "),
