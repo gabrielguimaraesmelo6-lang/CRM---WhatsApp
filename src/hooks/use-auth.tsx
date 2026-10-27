@@ -45,6 +45,21 @@ interface AccountSummary {
   default_currency: string;
 }
 
+/**
+ * Marca da loja (migration 050). Vem da organização de quem está logado
+ * (dono, gestores e também as contas de vendedor ligadas à loja). Null
+ * quando a conta não pertence a uma loja com marca própria — aí o app
+ * usa o visual padrão do produto.
+ */
+export interface Branding {
+  organizationId: string;
+  name: string | null;
+  logoUrl: string | null;
+  theme: string | null;
+  /** Módulos ligados para a loja: { trafego?: boolean, estoque?: boolean }. */
+  modules: Record<string, boolean>;
+}
+
 interface AuthContextValue {
   user: User | null;
   profile: Profile | null;
@@ -111,6 +126,8 @@ interface AuthContextValue {
    * and only show the suspended screen once this is explicitly true.
    */
   suspended: boolean;
+  /** Marca e módulos da loja. Null enquanto carrega ou quando não há. */
+  branding: Branding | null;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -125,6 +142,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [account, setAccount] = useState<AccountSummary | null>(null);
   const [suspended, setSuspended] = useState(false);
+  const [branding, setBranding] = useState<Branding | null>(null);
   const [loading, setLoading] = useState(true);
   // Tracked separately from `loading`. The session settles fast (one
   // local cookie read); the profile fetch crosses the network and
@@ -238,6 +256,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } else {
           setSuspended(!!isSuspended);
         }
+
+        // Marca da loja (migration 050). Falha silenciosa: sem a função
+        // (banco ainda sem a 050) ou sem loja, fica o visual padrão.
+        const { data: marca, error: marcaErr } = await supabase.rpc("my_branding");
+        const linha = Array.isArray(marca) ? marca[0] : marca;
+        if (marcaErr || !linha) {
+          setBranding(null);
+        } else {
+          const mods = (linha.modules ?? {}) as Record<string, unknown>;
+          setBranding({
+            organizationId: linha.organization_id,
+            name: linha.brand_name ?? null,
+            logoUrl: linha.brand_logo_url ?? null,
+            theme: linha.brand_theme ?? null,
+            modules: Object.fromEntries(
+              Object.entries(mods).map(([k, v]) => [k, v === true]),
+            ),
+          });
+        }
       } else {
         lastFetchedUserIdRef.current = null;
       }
@@ -312,6 +349,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setProfile(null);
         setAccount(null);
         setSuspended(false);
+        setBranding(null);
         setProfileLoading(false);
       }
 
@@ -371,6 +409,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         account,
         defaultCurrency: account?.default_currency ?? DEFAULT_CURRENCY,
         suspended,
+        branding,
         ...derived,
       }}
     >
@@ -411,6 +450,7 @@ export function useAuth(): AuthContextValue {
       canEditSettings: false,
       canSendMessages: false,
       suspended: false,
+      branding: null,
     };
   }
   return ctx;

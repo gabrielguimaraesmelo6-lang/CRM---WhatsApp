@@ -19,6 +19,7 @@ export const THEME_IDS = [
   "cobalt",
   "amber",
   "rose",
+  "ibox",
 ] as const;
 
 export type ThemeId = (typeof THEME_IDS)[number];
@@ -96,6 +97,12 @@ export const THEMES: ReadonlyArray<ThemeMeta> = [
     name: "Rose",
     tagline: "Bold and modern — D2C, creator-economy, lifestyle.",
     swatch: "oklch(0.645 0.22 16)",
+  },
+  {
+    id: "ibox",
+    name: "iBox",
+    tagline: "Preto e dourado da iBox Prime, com a fonte Outfit.",
+    swatch: "oklch(0.847 0.135 82.6)",
   },
 ];
 

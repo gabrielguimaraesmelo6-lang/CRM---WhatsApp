@@ -47,8 +47,32 @@
     "groups": {
       "service": "Atendimento",
       "sales": "Vendas",
-      "automation": "Automação"
-    }
+      "automation": "Automação",
+      "crm": "CRM",
+      "trafego": "Tráfego",
+      "site": "Site",
+      "sistema": "Sistema"
+    },
+    "home": "Início",
+    "trafficOverview": "Visão geral",
+    "trafficCampaigns": "Campanhas",
+    "trafficCars": "Carros · retorno",
+    "trafficSellers": "Vendedores",
+    "trafficUtm": "Links UTM",
+    "trafficAlerts": "Alertas",
+    "trafficConnections": "Conexões",
+    "siteStock": "Estoque",
+    "siteSold": "Vendidos",
+    "siteNewVehicle": "Novo veículo",
+    "siteFinance": "Financeiro",
+    "siteDocuments": "Documentos",
+    "siteReports": "Relatórios e backup",
+    "siteContent": "Conteúdo do site",
+    "siteLinks": "Página de links",
+    "siteClub": "Leads do Club",
+    "siteSettings": "Configurações do site",
+    "siteUsers": "Usuários do site",
+    "soon": "Em breve"
   },
   "Header": {
     "dashboard": "Painel",
@@ -370,9 +394,9 @@
         "notes": "Notas",
         "custom": "Campos personalizados",
         "deals": "Negócios",
-      "noTags": "Sem etiquetas",
-      "noDeals": "Sem negócios",
-      "addNotePlaceholder": "Adicionar uma nota..."
+        "noTags": "Sem etiquetas",
+        "noDeals": "Sem negócios",
+        "addNotePlaceholder": "Adicionar uma nota..."
       },
       "actions": {
         "edit": "Editar",
@@ -1470,13 +1494,11 @@
       "deleteLocallyAria": "Excluir modelo localmente",
       "deleteMetaLocallyTitle": "Excluir da Meta e localmente",
       "deleteLocallyTitle": "Excluir localmente",
-
       "dialogEditTitle": "Editar modelo de mensagem",
       "dialogNewTitle": "Novo modelo de mensagem",
       "dialogEditDesc": "Salve suas alterações para reenviar à Meta. O status voltará para PENDENTE durante a revisão.",
       "dialogNewDesc": "Crie um modelo e envie-o para aprovação da Meta. Uma vez aprovado, você pode usá-lo em transmissões e na caixa de entrada.",
       "authWarning": "Modelos de AUTENTICAÇÃO têm um formato fixo de corpo + botão OTP que precisa de um construtor diferente. Crie-os no Meta WhatsApp Manager por enquanto e use <bold>Sincronizar da Meta</bold> para trazê-los.",
-
       "templateName": "Nome do modelo",
       "namePlaceholder": "ex.: confirmacao_pedido",
       "nameFixed": "O nome fica fixo depois que o modelo existe na Meta — crie um novo modelo para alterá-lo.",
@@ -1485,7 +1507,6 @@
       "language": "Idioma",
       "langFixed": "O idioma fica fixo depois que o modelo existe na Meta.",
       "langHint": "Deve corresponder exatamente ao código na Meta — <code>en_US</code> e <code>en</code> são distintos.",
-
       "header": "Cabeçalho",
       "headerNone": "Nenhum",
       "headerText": "Texto",
@@ -1495,7 +1516,6 @@
       "headerTextPlaceholder": "Texto do cabeçalho (máx. 60 caracteres, opcional '{{1}}')",
       "headerSampleAria": "Valor de exemplo para a variável do cabeçalho",
       "headerSamplePlaceholder": "Valor de exemplo para '{{1}}' (obrigatório para revisão da Meta)",
-
       "uploadImage": "Enviar imagem",
       "uploadHint": "JPEG ou PNG, ≤5 MB",
       "mediaUrlPlaceholder": "https://… (ou cole um link público {format})",
@@ -1503,17 +1523,14 @@
       "mediaHint": "Deve ser um link HTTPS publicamente acessível. A Meta o busca uma vez durante a revisão, então precisa ficar disponível por ~24h.",
       "videoHint": " Recomendado: MP4 / 3GPP, ≤16 MB, ≤60 segundos.",
       "documentHint": " Recomendado: PDF, ≤100 MB.",
-
       "bodyText": "Texto do corpo",
       "bodyPlaceholder": "Olá '{{1}}', seu pedido '{{2}}' está confirmado.",
       "bodyHint": "Use '{{1}}', '{{2}}' para variáveis (devem ser contíguas, começando em '{{1}}').",
       "sampleValues": "Valores de exemplo (a Meta usa isso para revisar seu modelo)",
       "sampleAria": "Valor de exemplo para a variável do corpo {var}",
       "samplePlaceholder": "Exemplo para {var}",
-
       "footer": "Rodapé (opcional)",
       "footerPlaceholder": "Texto do rodapé opcional (máx. 60 caracteres)",
-
       "buttons": "Botões (opcional)",
       "addButton": "Adicionar botão",
       "buttonsLimit": "Até {max} botões. Botões de RESPOSTA RÁPIDA devem vir antes dos botões de URL / telefone / código de cópia.",
@@ -1526,19 +1543,16 @@
       "urlSamplePlaceholder": "Valor de exemplo para '{{1}}' (obrigatório quando a URL tem uma variável)",
       "phonePlaceholder": "+5511999999999",
       "codePlaceholder": "Código de exemplo (ex.: VERAO20)",
-
       "cancel": "Cancelar",
       "saving": "Salvando…",
       "submitting": "Enviando…",
       "saveResubmit": "Salvar e reenviar",
       "submitApproval": "Enviar para aprovação",
-
       "deleteDialogTitle": "Excluir modelo?",
       "deleteMetaDesc": "\"{name}\" será excluído da Meta e do WGA. Transmissões ativas que usam este modelo começarão a falhar no próximo envio. Isso não pode ser desfeito.",
       "deleteLocalDesc": "\"{name}\" será excluído do WGA. Ele nunca foi enviado à Meta, então nenhuma limpeza remota é necessária.",
       "deleting": "Excluindo…",
       "delete": "Excluir",
-
       "toastLoadFailed": "Falha ao carregar modelos",
       "toastSubmitFailed": "Falha ao enviar",
       "toastSubmitEditSuccess": "Edição enviada — a Meta normalmente revisa em até 24 horas.",
@@ -1785,7 +1799,6 @@
       "profileSaved": "Perfil salvo",
       "emailChangeFailed": "Falha ao alterar o e-mail: {message}",
       "profileSavedEmailCheck": "Perfil salvo — verifique seu e-mail para confirmar a alteração de endereço",
-
       "passwordTitle": "Senha",
       "passwordDesc": "Use pelo menos {min} caracteres. Você continuará conectado(a) neste dispositivo após alterá-la.",
       "currentPassword": "Senha atual",
@@ -1799,7 +1812,6 @@
       "currentPasswordIncorrect": "A senha atual está incorreta",
       "passwordUpdateFailed": "Falha ao atualizar a senha: {message}",
       "passwordUpdated": "Senha atualizada",
-
       "sessionsTitle": "Sessões ativas",
       "sessionsDesc": "Saia de todos os dispositivos onde você está conectado(a) — incluindo este. Útil se você perdeu um notebook ou compartilhou sua senha.",
       "signOutAll": "Sair de todos os dispositivos",

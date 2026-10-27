@@ -228,3 +228,57 @@ html[data-theme="rose"] {
     @apply font-sans;
   }
 }
+/* ============================================================
+ * MARCA "ibox" — identidade da iBox Prime (mesmos tokens do site e
+ * do brandbook): preto profundo, dourado #F8C45B, fonte Outfit, cantos
+ * mais retos. Aplicada quando a loja tem brand_theme = 'ibox'
+ * (migration 050) ou quando o usuário escolhe "iBox" em Aparência.
+ * Sobrescreve também as superfícies neutras do modo escuro, para o
+ * fundo ficar preto de verdade como no site.
+ * ============================================================ */
+html[data-theme="ibox"] {
+  --primary: oklch(0.847 0.135 82.6);
+  --primary-foreground: oklch(0 0 0);
+  --primary-hover: oklch(0.88 0.12 85);
+  --primary-soft: oklch(0.847 0.135 82.6 / 0.1);
+  --primary-soft-2: oklch(0.847 0.135 82.6 / 0.18);
+  --ring: oklch(0.847 0.135 82.6);
+  --chart-1: oklch(0.847 0.135 82.6);
+  --chart-2: oklch(0.62 0.105 74.7);
+  --sidebar-primary: oklch(0.847 0.135 82.6);
+  --sidebar-primary-foreground: oklch(0 0 0);
+  --sidebar-ring: oklch(0.847 0.135 82.6);
+  --radius: 0.375rem;
+  --font-sans: var(--font-outfit), ui-sans-serif, system-ui, sans-serif;
+}
+
+html[data-theme="ibox"][data-mode="dark"] {
+  --background: oklch(0 0 0);
+  --card: oklch(0.145 0 0);
+  --card-2: oklch(0.178 0 0);
+  --popover: oklch(0.145 0 0);
+  --secondary: oklch(0.2 0 0);
+  --muted: oklch(0.2 0 0);
+  --muted-foreground: oklch(0.732 0 0);
+  --accent: oklch(0.226 0 0);
+  --border: oklch(0.847 0.135 82.6 / 0.14);
+  --input: oklch(0.269 0 0);
+  --sidebar: oklch(0.1 0 0);
+  --sidebar-accent: oklch(0.2 0 0);
+  --sidebar-border: oklch(0.847 0.135 82.6 / 0.14);
+}
+
+/* No modo claro o dourado puro some no branco: usa o dourado escuro
+ * do brandbook (#AB7C35) como cor principal. */
+html[data-theme="ibox"][data-mode="light"] {
+  --primary: oklch(0.62 0.105 74.7);
+  --primary-foreground: oklch(1 0 0);
+  --primary-hover: oklch(0.56 0.1 74.7);
+  --primary-soft: oklch(0.62 0.105 74.7 / 0.1);
+  --primary-soft-2: oklch(0.62 0.105 74.7 / 0.18);
+  --ring: oklch(0.62 0.105 74.7);
+  --chart-1: oklch(0.62 0.105 74.7);
+  --sidebar-primary: oklch(0.62 0.105 74.7);
+  --sidebar-primary-foreground: oklch(1 0 0);
+  --sidebar-ring: oklch(0.62 0.105 74.7);
+}

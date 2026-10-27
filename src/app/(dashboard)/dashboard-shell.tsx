@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
+import { useTheme } from "@/hooks/use-theme";
+import { isThemeId } from "@/lib/themes";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
 import { PresenceHeartbeat } from "@/components/presence/presence-heartbeat";
@@ -15,7 +17,17 @@ import { ShieldOff } from "lucide-react";
 // client components can't export Next's metadata object.
 
 function DashboardShellInner({ children }: { children: React.ReactNode }) {
-  const { user, loading, profileLoading, suspended, signOut } = useAuth();
+  const { user, loading, profileLoading, suspended, signOut, branding } = useAuth();
+  const { theme, setTheme } = useTheme();
+
+  // Marca da loja: quando a loja tem tema próprio (ex.: "ibox"), todo
+  // mundo da loja vê o sistema com ele. O tema fica salvo no navegador,
+  // então a tela de login já abre com a cara da loja na próxima vez.
+  useEffect(() => {
+    if (branding?.theme && isThemeId(branding.theme) && branding.theme !== theme) {
+      setTheme(branding.theme);
+    }
+  }, [branding?.theme, theme, setTheme]);
   const router = useRouter();
   const t = useTranslations("AccountSuspended");
 

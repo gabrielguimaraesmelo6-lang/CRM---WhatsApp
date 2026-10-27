@@ -2,14 +2,28 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
 import { useTotalUnread } from "@/hooks/use-total-unread";
 import { useUnreadNotifications } from "@/hooks/use-unread-notifications";
 import {
+  BadgeCheck,
+  BarChart3,
   Bell,
+  BellRing,
   Bot,
+  Car,
+  ChevronDown,
+  CirclePlus,
+  FileBarChart,
+  FileText,
+  LayoutTemplate,
+  Link2,
+  Megaphone,
+  Plug,
+  SlidersHorizontal,
+  Wallet,
   Crown,
   GitBranch,
   LayoutDashboard,
@@ -26,7 +40,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import type { AccountRole } from "@/lib/auth/roles";
+import { hasMinRole, type AccountRole } from "@/lib/auth/roles";
 
 // Per-role chip metadata used in the sidebar's account strip + the
 // Members tab roster. Keeping this near both consumers in a single
@@ -78,46 +92,96 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-type NavGroup = "top" | "service" | "sales" | "automation";
+// ------------------------------------------------------------
+// Menu do sistema único, por categoria: Início · CRM · Tráfego · Site ·
+// Sistema. Tráfego e Site são módulos que vieram dos outros sistemas da
+// loja; só aparecem quando a loja tem o módulo ligado (organizations.
+// modules, migration 050) e para os papéis que usam aquela área.
+// ------------------------------------------------------------
+type ModuleKey = "trafego" | "estoque";
 
 interface NavItem {
   href: string;
   labelKey: string;
   icon: typeof LayoutDashboard;
-  group: NavGroup;
-  /**
-   * When true, the nav row renders a small "Beta" chip after the label.
-   * Purely informational — doesn't affect routing or access.
-   */
+  /** Rótulo "Beta" ao lado do nome (só informativo). */
   beta?: boolean;
+  /** Papel mínimo para ver o item. Sem valor: todos da conta. */
+  minRole?: AccountRole;
+  /** Tela ainda em construção: mostra o rótulo "Em breve". */
+  soon?: boolean;
 }
 
-// Grouped nav — same pattern as the Settings rail (settings-rail.tsx's
-// RAIL_GROUPS): a small uppercase label above each cluster of related
-// links, so the main sidebar reads the same way Settings already
-// does instead of one long undifferentiated list.
-const navItems: NavItem[] = [
-  { href: "/dashboard", labelKey: "dashboard", icon: LayoutDashboard, group: "top" },
-  { href: "/inbox", labelKey: "inbox", icon: MessageSquare, group: "service" },
-  { href: "/notifications", labelKey: "notifications", icon: Bell, group: "service" },
-  { href: "/contacts", labelKey: "contacts", icon: Users, group: "service" },
-  { href: "/pipelines", labelKey: "pipelines", icon: GitBranch, group: "sales" },
-  { href: "/broadcasts", labelKey: "broadcasts", icon: Radio, group: "sales" },
-  { href: "/automations", labelKey: "automations", icon: Zap, group: "automation" },
-  { href: "/flows", labelKey: "flows", icon: Workflow, group: "automation", beta: true },
-  { href: "/agents", labelKey: "aiAgents", icon: Bot, group: "automation" },
+interface NavSection {
+  id: string;
+  /** Null = sem título (o Início fica solto no topo). */
+  labelKey: string | null;
+  module?: ModuleKey;
+  minRole?: AccountRole;
+  items: NavItem[];
+}
+
+const NAV_SECTIONS: NavSection[] = [
+  {
+    id: "top",
+    labelKey: null,
+    items: [{ href: "/dashboard", labelKey: "home", icon: LayoutDashboard }],
+  },
+  {
+    id: "crm",
+    labelKey: "groups.crm",
+    items: [
+      { href: "/inbox", labelKey: "inbox", icon: MessageSquare },
+      { href: "/notifications", labelKey: "notifications", icon: Bell },
+      { href: "/contacts", labelKey: "contacts", icon: Users },
+      { href: "/pipelines", labelKey: "pipelines", icon: GitBranch },
+      { href: "/broadcasts", labelKey: "broadcasts", icon: Radio },
+      { href: "/automations", labelKey: "automations", icon: Zap },
+      { href: "/flows", labelKey: "flows", icon: Workflow, beta: true },
+      { href: "/agents", labelKey: "aiAgents", icon: Bot },
+    ],
+  },
+  {
+    id: "trafego",
+    labelKey: "groups.trafego",
+    module: "trafego",
+    minRole: "admin",
+    items: [
+      { href: "/trafego", labelKey: "trafficOverview", icon: BarChart3, soon: true },
+      { href: "/trafego/campanhas", labelKey: "trafficCampaigns", icon: Megaphone, soon: true },
+      { href: "/trafego/carros", labelKey: "trafficCars", icon: Car, soon: true },
+      { href: "/trafego/vendedores", labelKey: "trafficSellers", icon: UsersRound, soon: true },
+      { href: "/trafego/links-utm", labelKey: "trafficUtm", icon: Link2, soon: true },
+      { href: "/trafego/alertas", labelKey: "trafficAlerts", icon: BellRing, soon: true },
+      { href: "/trafego/conexoes", labelKey: "trafficConnections", icon: Plug, soon: true },
+    ],
+  },
+  {
+    id: "site",
+    labelKey: "groups.site",
+    module: "estoque",
+    items: [
+      { href: "/site/estoque", labelKey: "siteStock", icon: Car, soon: true },
+      { href: "/site/vendidos", labelKey: "siteSold", icon: BadgeCheck, minRole: "admin", soon: true },
+      { href: "/site/novo-veiculo", labelKey: "siteNewVehicle", icon: CirclePlus, minRole: "admin", soon: true },
+      { href: "/site/financeiro", labelKey: "siteFinance", icon: Wallet, minRole: "admin", soon: true },
+      { href: "/site/documentos", labelKey: "siteDocuments", icon: FileText, minRole: "admin", soon: true },
+      { href: "/site/relatorios", labelKey: "siteReports", icon: FileBarChart, minRole: "admin", soon: true },
+      { href: "/site/conteudo", labelKey: "siteContent", icon: LayoutTemplate, minRole: "admin", soon: true },
+      { href: "/site/links", labelKey: "siteLinks", icon: Link2, minRole: "admin", soon: true },
+      { href: "/site/club", labelKey: "siteClub", icon: Crown, minRole: "admin", soon: true },
+      { href: "/site/configuracoes", labelKey: "siteSettings", icon: SlidersHorizontal, minRole: "owner", soon: true },
+      { href: "/site/usuarios", labelKey: "siteUsers", icon: UserCog, minRole: "owner", soon: true },
+    ],
+  },
+  {
+    id: "sistema",
+    labelKey: "groups.sistema",
+    items: [{ href: "/settings", labelKey: "settings", icon: Settings }],
+  },
 ];
 
-const NAV_GROUPS: { group: NavGroup; labelKey: string | null }[] = [
-  { group: "top", labelKey: null },
-  { group: "service", labelKey: "groups.service" },
-  { group: "sales", labelKey: "groups.sales" },
-  { group: "automation", labelKey: "groups.automation" },
-];
-
-const bottomNavItems = [
-  { href: "/settings", labelKey: "settings", icon: Settings },
-];
+const SECTIONS_STORAGE_KEY = "wacrm.sidebar.fechadas";
 
 interface SidebarProps {
   /** Controlled on mobile by the Header's hamburger button. Ignored on lg+. */
@@ -130,9 +194,43 @@ import { useTranslations } from "next-intl";
 export function Sidebar({ open = false, onClose }: SidebarProps) {
   const t = useTranslations("Sidebar");
   const pathname = usePathname();
-  const { profile, profileLoading, account, accountRole, signOut } = useAuth();
+  const { profile, profileLoading, account, accountRole, signOut, branding } = useAuth();
   const totalUnread = useTotalUnread();
   const unreadNotifications = useUnreadNotifications();
+
+  // Categorias visíveis para esta pessoa: módulo ligado na loja + papel.
+  const visibleSections = NAV_SECTIONS.map((section) => {
+    const podeSecao =
+      (!section.module || branding?.modules?.[section.module] === true) &&
+      (!section.minRole || (accountRole !== null && hasMinRole(accountRole, section.minRole)));
+    if (!podeSecao) return null;
+    const items = section.items.filter(
+      (item) => !item.minRole || (accountRole !== null && hasMinRole(accountRole, item.minRole)),
+    );
+    return items.length ? { ...section, items } : null;
+  }).filter((s): s is NavSection => s !== null);
+
+  // Categorias recolhidas (guardado só neste navegador).
+  const [fechadas, setFechadas] = useState<string[]>([]);
+  useEffect(() => {
+    try {
+      const salvo = JSON.parse(localStorage.getItem(SECTIONS_STORAGE_KEY) ?? "[]");
+      if (Array.isArray(salvo)) setFechadas(salvo.filter((x) => typeof x === "string"));
+    } catch {
+      // localStorage indisponível: tudo aberto.
+    }
+  }, []);
+  const alternarSecao = (id: string) => {
+    setFechadas((atual) => {
+      const nova = atual.includes(id) ? atual.filter((x) => x !== id) : [...atual, id];
+      try {
+        localStorage.setItem(SECTIONS_STORAGE_KEY, JSON.stringify(nova));
+      } catch {
+        // ignora
+      }
+      return nova;
+    });
+  };
   // Only surface the account-name strip when it actually carries
   // information. A solo user's personal account is named after them
   // (the 017 signup trigger seeds it from `full_name`), so showing it
@@ -201,13 +299,25 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
         {/* Logo row. On mobile we put a close button here; on desktop the
             close button is hidden since the sidebar is always-visible. */}
         <div className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-border px-4">
-          <Link href="/dashboard" className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-              <MessageSquare className="h-4 w-4" />
-            </div>
-            <span className="text-sm font-semibold text-foreground">
-              {t("title")}
-            </span>
+          <Link href="/dashboard" className="flex min-w-0 items-center gap-2">
+            {branding?.logoUrl ? (
+              // Logo da loja (marca própria, migration 050).
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={branding.logoUrl}
+                alt={branding.name ?? t("title")}
+                className="h-9 w-auto max-w-[150px] object-contain"
+              />
+            ) : (
+              <>
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+                  <MessageSquare className="h-4 w-4" />
+                </div>
+                <span className="truncate text-sm font-semibold text-foreground">
+                  {branding?.name ?? t("title")}
+                </span>
+              </>
+            )}
           </Link>
           <button
             type="button"
@@ -219,106 +329,99 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
           </button>
         </div>
 
-        {/* Main navigation — grouped, same visual pattern as the
-            Settings rail (small uppercase label above each cluster). */}
+        {/* Menu por categoria. Cada categoria abre e fecha; a escolha
+            fica guardada neste navegador. */}
         <nav className="flex-1 overflow-y-auto px-3 py-4">
-          {NAV_GROUPS.map(({ group, labelKey }) => {
-            const items = navItems.filter((item) => item.group === group);
-            if (items.length === 0) return null;
+          {visibleSections.map((section) => {
+            const fechada = section.labelKey !== null && fechadas.includes(section.id);
             return (
-              <div key={group} className="mb-1">
-                {labelKey ? (
-                  <div className="px-3 pt-3 pb-1.5 text-[11px] font-semibold tracking-[0.09em] text-muted-foreground uppercase">
-                    {t(labelKey)}
-                  </div>
+              <div key={section.id} className="mb-1">
+                {section.labelKey ? (
+                  <button
+                    type="button"
+                    onClick={() => alternarSecao(section.id)}
+                    aria-expanded={!fechada}
+                    className="flex w-full items-center gap-2 rounded-md px-3 pt-3 pb-1.5 text-left text-[11px] font-semibold tracking-[0.12em] text-primary uppercase hover:text-primary-hover"
+                  >
+                    <span className="flex-1">{t(section.labelKey)}</span>
+                    <ChevronDown
+                      className={cn(
+                        "size-3.5 text-muted-foreground transition-transform",
+                        fechada && "-rotate-90",
+                      )}
+                    />
+                  </button>
                 ) : null}
-                <ul className="flex flex-col gap-1">
-                  {items.map((item) => {
-                    const isActive =
-                      pathname === item.href ||
-                      (item.href !== "/dashboard" && pathname.startsWith(item.href));
+                {fechada ? null : (
+                  <ul className="flex flex-col gap-1">
+                    {section.items.map((item) => {
+                      const isActive =
+                        pathname === item.href ||
+                        (item.href !== "/dashboard" &&
+                          item.href !== "/trafego" &&
+                          pathname.startsWith(item.href));
 
-                    const showUnreadDot =
-                      item.href === "/inbox" && totalUnread > 0 && !isActive;
+                      const showUnreadDot =
+                        item.href === "/inbox" && totalUnread > 0 && !isActive;
 
-                    // Unlike the inbox dot, the notifications count stays
-                    // visible even while the page is active — it reflects
-                    // unread state (cleared by marking notifications read),
-                    // not "currently viewing this section".
-                    const showNotificationBadge =
-                      item.href === "/notifications" && unreadNotifications > 0;
+                      // O contador de notificações continua visível mesmo
+                      // com a página aberta — reflete o que não foi lido.
+                      const showNotificationBadge =
+                        item.href === "/notifications" && unreadNotifications > 0;
 
-                    return (
-                      <li key={item.href}>
-                        <Link
-                          href={item.href}
-                          className={cn(
-                            // Taller on mobile so fingers can hit the row reliably (≥44px).
-                            "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors lg:py-2",
-                            isActive
-                              ? "bg-primary/10 text-primary"
-                              : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                          )}
-                        >
-                          <item.icon className="h-4 w-4" />
-                          <span className="flex-1">{t(item.labelKey as string)}</span>
-                          {item.beta && (
-                            <span
-                              aria-label={t("beta")}
-                              className="rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-amber-300"
-                            >
-                              {t("beta")}
-                            </span>
-                          )}
-                          {showUnreadDot && (
-                            <span
-                              aria-label={t("unreadConversations", { count: totalUnread })}
-                              className="relative flex h-2 w-2"
-                            >
-                              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
-                              <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
-                            </span>
-                          )}
-                          {showNotificationBadge && (
-                            <span
-                              aria-label={t("unreadNotifications", { count: unreadNotifications })}
-                              className="flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold text-primary-foreground"
-                            >
-                              {unreadNotifications > 9 ? "9+" : unreadNotifications}
-                            </span>
-                          )}
-                        </Link>
-                      </li>
-                    );
-                  })}
-                </ul>
+                      return (
+                        <li key={item.href}>
+                          <Link
+                            href={item.href}
+                            className={cn(
+                              // Mais alto no celular para o dedo acertar (≥44px).
+                              "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors lg:py-2",
+                              isActive
+                                ? "bg-primary/10 text-primary"
+                                : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                            )}
+                          >
+                            <item.icon className="h-4 w-4" />
+                            <span className="flex-1">{t(item.labelKey as string)}</span>
+                            {item.beta && (
+                              <span
+                                aria-label={t("beta")}
+                                className="rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-amber-300"
+                              >
+                                {t("beta")}
+                              </span>
+                            )}
+                            {item.soon && (
+                              <span className="rounded-full border border-border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
+                                {t("soon")}
+                              </span>
+                            )}
+                            {showUnreadDot && (
+                              <span
+                                aria-label={t("unreadConversations", { count: totalUnread })}
+                                className="relative flex h-2 w-2"
+                              >
+                                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
+                                <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
+                              </span>
+                            )}
+                            {showNotificationBadge && (
+                              <span
+                                aria-label={t("unreadNotifications", { count: unreadNotifications })}
+                                className="flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold text-primary-foreground"
+                              >
+                                {unreadNotifications > 9 ? "9+" : unreadNotifications}
+                              </span>
+                            )}
+                          </Link>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
               </div>
             );
           })}
-
-          <div className="my-3 border-t border-border" />
-
-          <ul className="flex flex-col gap-1">
-            {bottomNavItems.map((item) => {
-              const isActive = pathname.startsWith(item.href);
-              return (
-                <li key={item.href}>
-                  <Link
-                    href={item.href}
-                    className={cn(
-                      "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors lg:py-2",
-                      isActive
-                        ? "bg-primary/10 text-primary"
-                        : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                    )}
-                  >
-                    <item.icon className="h-4 w-4" />
-                    {t(item.labelKey as string)}
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
         </nav>
 
         {/* User section */}
