@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { montarRelatorio } from "./relatorio-anuncios";
-import { custoPorCarro, pdfRelatorio } from "./relatorio-anuncios-pdf";
+import { custoPorCarro, objetivoDaCampanha, pdfRelatorio } from "./relatorio-anuncios-pdf";
 
 const base = { status: "ACTIVE", categoria_objetivo: null, destino_id: null, divisao: null };
 const rel = montarRelatorio({
@@ -36,5 +36,20 @@ describe("custoPorCarro", () => {
     const r2 = { ...rel, carros: rel.carros.map((c) => ({ ...c, nome: c.nome + " 🚗 – ✓" })) };
     const b = await pdfRelatorio(r2, { periodo: "desde o início", geradoEm: "16/11/2026 11:00" });
     expect(Buffer.from(b.slice(0, 5)).toString()).toBe("%PDF-");
+  });
+});
+
+describe("objetivoDaCampanha", () => {
+  it("usa a finalidade do sistema e, sem ela, sugere pelo objetivo do Meta e pelo nome", () => {
+    expect(objetivoDaCampanha({ nome: "x", categoria_objetivo: "alcance", destino_id: null })).toEqual({ chave: "alcance", sugerido: false });
+    expect(objetivoDaCampanha({ nome: "Engajamento Insta", categoria_objetivo: null, destino_id: null, objetivo: "OUTCOME_ENGAGEMENT" })).toEqual({ chave: "perfil_engajamento", sugerido: true });
+    expect(objetivoDaCampanha({ nome: "Campanha marca", categoria_objetivo: null, destino_id: null, objetivo: null })).toEqual({ chave: "reconhecimento", sugerido: true });
+    expect(objetivoDaCampanha({ nome: "Vendas WhatsApp", categoria_objetivo: null, destino_id: null, objetivo: "OUTCOME_SALES" })).toEqual({ chave: "sem", sugerido: false });
+  });
+
+  it("separa o gasto sem carro por objetivo, agrupado (Instagram, Site, Visibilidade…)", () => {
+    const d = custoPorCarro(rel, [{ id: "c", nome: "Engajamento", categoria_objetivo: "perfil_engajamento", destino_id: null } as never]);
+    expect(d.objetivos).toHaveLength(1);
+    expect(d.objetivos[0]).toMatchObject({ nome: "Instagram", gasto: 11.2, itens: [{ chave: "perfil_engajamento", nome: "Engajamento", gasto: 11.2 }] });
   });
 });

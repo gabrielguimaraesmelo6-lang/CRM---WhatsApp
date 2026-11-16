@@ -60,7 +60,7 @@ export async function GET(req: Request) {
     const agora = new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Bahia", dateStyle: "short", timeStyle: "short" }).format(new Date());
     const base = `relatorio-anuncios-ibox-${de || "inicio"}-a-${ate || new Intl.DateTimeFormat("en-CA", { timeZone: "America/Bahia" }).format(new Date())}`;
     if (pdf) {
-      const arquivo = await pdfRelatorio(r, { periodo, geradoEm: agora });
+      const arquivo = await pdfRelatorio(r, { periodo, geradoEm: agora, campanhas: g.campanhas });
       return new Response(new Uint8Array(arquivo), {
         headers: { "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${base}-por-carro-mes-a-mes.pdf"`, "Cache-Control": "no-store" },
       });

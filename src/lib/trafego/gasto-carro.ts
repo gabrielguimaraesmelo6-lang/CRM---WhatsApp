@@ -70,12 +70,12 @@ export function partesPorCarro(linhas: GastoCarro[]): { campaign_id: string; car
  * (sem as tabelas novas): aí tudo segue o car_id da campanha, como antes.
  */
 export async function carregarGastoPorCarro(admin: SupabaseClient, orgId: string, periodo: { desde?: string; ate?: string } = {}) {
-  let campanhas: (CampanhaDiv & { nome: string; status: string | null; categoria_objetivo: string | null; destino_id: string | null })[] = [];
+  let campanhas: (CampanhaDiv & { nome: string; status: string | null; categoria_objetivo: string | null; destino_id: string | null; objetivo?: string | null })[] = [];
   let temDivisao = true;
-  const comDiv = await fetchAll<(typeof campanhas)[number]>((a, b) => admin.from("tr_campaigns").select("id, nome, status, car_id, divisao, categoria_objetivo, destino_id").eq("org_id", orgId).order("id").range(a, b));
+  const comDiv = await fetchAll<(typeof campanhas)[number]>((a, b) => admin.from("tr_campaigns").select("id, nome, status, objetivo, car_id, divisao, categoria_objetivo, destino_id").eq("org_id", orgId).order("id").range(a, b));
   if (comDiv.error) {
     temDivisao = false;
-    const sem = await fetchAll<Omit<(typeof campanhas)[number], "divisao">>((a, b) => admin.from("tr_campaigns").select("id, nome, status, car_id, categoria_objetivo, destino_id").eq("org_id", orgId).order("id").range(a, b));
+    const sem = await fetchAll<Omit<(typeof campanhas)[number], "divisao">>((a, b) => admin.from("tr_campaigns").select("id, nome, status, objetivo, car_id, categoria_objetivo, destino_id").eq("org_id", orgId).order("id").range(a, b));
     campanhas = sem.data.map((c) => ({ ...c, divisao: null }));
   } else campanhas = comDiv.data;
 

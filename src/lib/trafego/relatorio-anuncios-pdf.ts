@@ -1,5 +1,6 @@
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
-import type { Relatorio } from "./relatorio-anuncios";
+import type { CampanhaRel, Relatorio } from "./relatorio-anuncios";
+import { rotuloFinalidade, sugerirFinalidade } from "./finalidades";
 
 // PDF do relatório de anúncios: o custo de cada CARRO, mês a mês (uma linha
 // por carro, uma coluna por mês). Campanhas não aparecem: todo o gasto das
@@ -34,8 +35,33 @@ const limpo = (s: string) => [...(s ?? "").normalize("NFC")].map((c) => { const 
 
 export type CarroMes = { chave: string; nome: string; placa: string; situacao: string; porMes: Record<string, number>; gasto: number; msgs: number };
 
+// Investimento que não foi para carro, separado por objetivo e agrupado.
+export const GRUPOS: { nome: string; chaves: string[] }[] = [
+  { nome: "Instagram", chaves: ["perfil_engajamento", "perfil_trafego"] },
+  { nome: "Site", chaves: ["site_trafego"] },
+  { nome: "Visibilidade", chaves: ["reconhecimento", "alcance"] },
+  { nome: "Outros objetivos", chaves: ["vendas", "engajamento", "institucional", "trafego_geral", "outro", "destino"] },
+  { nome: "Sem objetivo definido", chaves: ["sem"] },
+];
+const ROTULO_ITEM: Record<string, string> = { perfil_engajamento: "Engajamento", perfil_trafego: "Visitas ao perfil", site_trafego: "Tráfego para o site", reconhecimento: "Marca / branding", alcance: "Alcance", destino: "Link de destino cadastrado", sem: "Sem objetivo definido" };
+export const rotuloObjetivo = (k: string) => ROTULO_ITEM[k] ?? rotuloFinalidade(k);
+
+/**
+ * Objetivo de uma campanha sem carro: a finalidade escolhida no sistema; se não
+ * tem, a sugestão pelo objetivo do Meta e pelo nome (a mesma do Ligar campanhas).
+ */
+export function objetivoDaCampanha(c: Pick<CampanhaRel, "categoria_objetivo" | "destino_id" | "nome"> & { objetivo?: string | null }): { chave: string; sugerido: boolean } {
+  if (c.categoria_objetivo) return { chave: GRUPOS.some((g) => g.chaves.includes(c.categoria_objetivo!)) ? c.categoria_objetivo : "outro", sugerido: false };
+  if (c.destino_id) return { chave: "destino", sugerido: false };
+  const s = sugerirFinalidade(c.objetivo, c.nome || "");
+  return s ? { chave: s, sugerido: true } : { chave: "sem", sugerido: false };
+}
+
 /** Custo de cada carro em cada mês (parte pura, testada). Tudo que não é carro vai para `semCarro`. */
-export function custoPorCarro(r: Relatorio) {
+export function custoPorCarro(r: Relatorio, campanhas: CampanhaRel[] = []) {
+  const objetivo = new Map(campanhas.map((c) => [c.id, objetivoDaCampanha(c)]));
+  const porObjetivo = new Map<string, { porMes: Record<string, number>; gasto: number; msgs: number }>();
+  let gastoSugerido = 0;
   const info = new Map(r.carros.map((c) => [c.chave, c]));
   const carros = new Map<string, CarroMes>();
   const semCarro = { porMes: {} as Record<string, number>, gasto: 0, msgs: 0 };
@@ -46,6 +72,11 @@ export function custoPorCarro(r: Relatorio) {
     if (!d.carroId) {
       semCarro.porMes[mes] = (semCarro.porMes[mes] ?? 0) + d.gasto;
       semCarro.gasto += d.gasto; semCarro.msgs += d.msgs;
+      const ob = d.destino === "sem" && d.alvo.startsWith("Parte da campanha") ? { chave: "sem", sugerido: false } : objetivo.get(d.campanhaId) ?? { chave: "sem", sugerido: false };
+      if (ob.sugerido) gastoSugerido += d.gasto;
+      const x = porObjetivo.get(ob.chave) ?? { porMes: {}, gasto: 0, msgs: 0 };
+      x.porMes[mes] = (x.porMes[mes] ?? 0) + d.gasto; x.gasto += d.gasto; x.msgs += d.msgs;
+      porObjetivo.set(ob.chave, x);
       continue;
     }
     const c = info.get(d.carroId);
@@ -69,10 +100,15 @@ export function custoPorCarro(r: Relatorio) {
   const sem = fecha(semCarro);
   // O total vem da conta (montarRelatorio), para bater centavo a centavo com o Excel e o painel.
   const total = { porMes: Object.fromEntries(listaMeses.map((m) => [m, r2((totalCarros.porMes[m] ?? 0) + (sem.porMes[m] ?? 0))])), gasto: r.total.gasto, msgs: r.total.msgs };
-  return { meses: listaMeses, carros: lista, totalCarros, semCarro: sem, total };
+  const soma = (xs: { porMes: Record<string, number>; gasto: number; msgs: number }[]) => fecha({ porMes: Object.fromEntries(listaMeses.map((m) => [m, xs.reduce((s, x) => s + (x.porMes[m] ?? 0), 0)])), gasto: xs.reduce((s, x) => s + x.gasto, 0), msgs: xs.reduce((s, x) => s + x.msgs, 0) });
+  const objetivos = GRUPOS.map((g) => {
+    const itens = g.chaves.filter((k) => porObjetivo.has(k)).map((k) => ({ chave: k, nome: rotuloObjetivo(k), ...fecha(porObjetivo.get(k)!) })).sort((a, b) => b.gasto - a.gasto);
+    return { nome: g.nome, itens, ...soma(itens) };
+  }).filter((g) => g.itens.length);
+  return { meses: listaMeses, carros: lista, totalCarros, semCarro: sem, objetivos, gastoSugerido: r2(gastoSugerido), total };
 }
 
-export async function pdfRelatorio(r: Relatorio, o: { periodo: string; geradoEm: string }): Promise<Uint8Array> {
+export async function pdfRelatorio(r: Relatorio, o: { periodo: string; geradoEm: string; campanhas?: CampanhaRel[] }): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
   doc.setTitle(`Custo de anúncio por carro, mês a mês — ${o.periodo}`);
   doc.setAuthor("Sistema iBox");
@@ -132,7 +168,7 @@ export async function pdfRelatorio(r: Relatorio, o: { periodo: string; geradoEm:
     y -= 14;
   }
 
-  const d = custoPorCarro(r);
+  const d = custoPorCarro(r, o.campanhas);
 
   // ---------- Cabeçalho e números ----------
   pg.drawRectangle({ x: 0, y: A4.h - 96, width: A4.w, height: 96, color: COR.preto });
@@ -141,27 +177,63 @@ export async function pdfRelatorio(r: Relatorio, o: { periodo: string; geradoEm:
   texto(`Período: ${o.periodo}  ·  gerado em ${o.geradoEm} pelo Sistema iBox  ·  Meta (Facebook e Instagram), com imposto de 12%`, M, A4.h - 78, { size: 8.5, cor: rgb(0.78, 0.78, 0.78) });
   y = A4.h - 114;
 
+  const grupo = (n: string) => d.objetivos.find((g) => g.nome === n);
+  const pct = (g: number) => (d.total.gasto ? `${((g / d.total.gasto) * 100).toFixed(0)}% do total` : "");
   const kpis: [string, string, string][] = [
     ["Investido no total", brl(d.total.gasto), `${num(d.total.msgs)} conversas · ${porConversa(d.total.gasto, d.total.msgs)} cada`],
-    ["Investido em carros", brl(d.totalCarros.gasto), d.total.gasto ? `${((d.totalCarros.gasto / d.total.gasto) * 100).toFixed(0)}% do total` : ""],
-    ["Carros anunciados", String(d.carros.length), `${porConversa(d.totalCarros.gasto, d.totalCarros.msgs)} por conversa`],
-    ["Anúncios sem carro", brl(d.semCarro.gasto), "Instagram, site, marca, alcance"],
+    ["Carros", brl(d.totalCarros.gasto), `${d.carros.length} carros · ${pct(d.totalCarros.gasto)}`],
+    ...(["Instagram", "Site", "Visibilidade"] as const).map((n): [string, string, string] => [n, brl(grupo(n)?.gasto ?? 0), pct(grupo(n)?.gasto ?? 0) || "—"]),
   ];
   const kw = LARGURA / kpis.length;
   kpis.forEach(([rot, val, sub], i) => {
     const x = M + i * kw;
     pg.drawRectangle({ x: x + (i ? 4 : 0), y: y - 54, width: kw - 4, height: 54, borderColor: COR.linha, borderWidth: 0.8, color: COR.branco });
     texto(rot, x + 12, y - 15, { size: 7.5, cor: COR.mudo });
-    texto(val, x + 12, y - 33, { size: 14, font: fb, cor: i === 0 ? COR.ouro : COR.tinta });
+    texto(val, x + 12, y - 33, { size: 13, font: fb, cor: i === 0 ? COR.ouro : COR.tinta });
     texto(sub, x + 12, y - 46, { size: 7, cor: COR.mudo });
   });
   y -= 74;
 
-  // ---------- Tabela carro × mês ----------
   const grupos: string[][] = [];
   for (let i = 0; i < d.meses.length; i += MESES_POR_TABELA) grupos.push(d.meses.slice(i, i + MESES_POR_TABELA));
   if (!grupos.length) grupos.push([]);
   const v = (n: number | undefined) => (n ? brl(n) : "—");
+
+  // ---------- Para onde foi: carros e cada objetivo, mês a mês ----------
+  grupos.forEach((ms, gi) => {
+    const ultimo = gi === grupos.length - 1;
+    secao = "";
+    if (gi > 0) novaPagina();
+    const tit = grupos.length > 1 && ms.length ? `Investimento por objetivo: ${mesCurto(ms[0])} a ${mesCurto(ms[ms.length - 1])}` : "Investimento por objetivo, mês a mês";
+    texto(tit, M, y - 13, { font: fb, size: 13 });
+    texto("Carros e o que foi investido em cada objetivo sem carro: Instagram, site, visibilidade e os demais.", M, y - 26, { size: 8.5, cor: COR.mudo });
+    y -= 38;
+    secao = tit;
+    const cols: Col[] = [
+      { titulo: "Objetivo", w: 284 },
+      ...ms.map((m) => ({ titulo: mesCurto(m), w: 58, dir: true })),
+      ...(ultimo ? [{ titulo: "Total", w: 66, dir: true }, { titulo: "% do total", w: 52, dir: true }, { titulo: "Conversas", w: 52, dir: true }] : []),
+    ];
+    const resto = (x: { gasto: number; msgs: number }) => (ultimo ? [brl(x.gasto), d.total.gasto ? `${((x.gasto / d.total.gasto) * 100).toFixed(1).replace(".", ",")}%` : "—", num(x.msgs)] : []);
+    const linhas: { cels: string[]; negrito?: boolean; fundo?: boolean; mudo?: boolean }[] = [
+      { cels: [`Carros (${d.carros.length})`, ...ms.map((m) => v(d.totalCarros.porMes[m])), ...resto(d.totalCarros)], negrito: true, fundo: true },
+    ];
+    for (const g of d.objetivos) {
+      const unico = g.itens.length === 1 && g.itens[0].nome === g.nome;
+      linhas.push({ cels: [g.nome, ...ms.map((m) => v(g.porMes[m])), ...resto(g)], negrito: true, fundo: true });
+      if (!unico) for (const it of g.itens) linhas.push({ cels: [`     ${it.nome}`, ...ms.map((m) => v(it.porMes[m])), ...resto(it)] });
+    }
+    linhas.push({ cels: ["Total da conta", ...ms.map((m) => v(d.total.porMes[m])), ...resto(d.total)], negrito: true, fundo: true });
+    tabela(cols, linhas);
+  });
+  if (d.gastoSugerido > 0) {
+    texto(`${brl(d.gastoSugerido)} são de campanhas ainda sem vínculo no sistema, classificadas pelo objetivo do Meta e pelo nome. Confirme em Ligar campanhas.`, M, y + 4, { size: 7.5, cor: COR.mudo });
+    y -= 12;
+  }
+
+  // ---------- Tabela carro × mês ----------
+  secao = "";
+  novaPagina();
   grupos.forEach((ms, gi) => {
     const ultimo = gi === grupos.length - 1;
     secao = "";
@@ -180,14 +252,14 @@ export async function pdfRelatorio(r: Relatorio, o: { periodo: string; geradoEm:
     tabela(cols, [
       ...d.carros.map((c) => ({ cels: [c.nome, c.placa, c.situacao, ...ms.map((m) => v(c.porMes[m])), ...resto(c)] })),
       { cels: ["Total em carros", "", "", ...ms.map((m) => v(d.totalCarros.porMes[m])), ...resto(d.totalCarros)], negrito: true, fundo: true },
-      { cels: ["Anúncios sem carro", "", "", ...ms.map((m) => v(d.semCarro.porMes[m])), ...resto(d.semCarro)], mudo: true },
+      { cels: ["Anúncios sem carro (ver por objetivo)", "", "", ...ms.map((m) => v(d.semCarro.porMes[m])), ...resto(d.semCarro)], mudo: true },
       { cels: ["Total da conta", "", "", ...ms.map((m) => v(d.total.porMes[m])), ...resto(d.total)], negrito: true, fundo: true },
     ]);
   });
   secao = "";
   if (y < M + 50) novaPagina();
   texto("Cada carro soma todas as campanhas dele e a parte dele nas campanhas divididas entre vários carros. “Fora do Pátio”: cadastro antigo do Marketing ainda não ligado a um carro do Pátio.", M, y, { size: 7.5, cor: COR.mudo });
-  texto("“Anúncios sem carro”: campanhas de Instagram, site, marca ou alcance, e campanhas ainda sem vínculo. Valores com o imposto de 12% do Meta.", M, y - 10, { size: 7.5, cor: COR.mudo });
+  texto("“Anúncios sem carro”: Instagram, site, visibilidade e os outros objetivos, separados na tabela por objetivo. Valores com o imposto de 12% do Meta.", M, y - 10, { size: 7.5, cor: COR.mudo });
 
   const paginas = doc.getPages();
   paginas.forEach((p, i) => {
