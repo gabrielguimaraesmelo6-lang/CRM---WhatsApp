@@ -8,17 +8,38 @@ import { fetchAll } from "@/lib/trafego/fetchAll";
 import { carregarGastoPorCarro } from "@/lib/trafego/gasto-carro";
 import { montarRelatorio, type CarroRel, type VeiculoRel } from "@/lib/trafego/relatorio-anuncios";
 import { planilhaRelatorio } from "@/lib/trafego/relatorio-anuncios-xlsx";
-import { pdfRelatorio } from "@/lib/trafego/relatorio-anuncios-pdf";
+import { pdfRelatorio, type GrupoSituacao, type OpcoesPdf, type OrdemCarros } from "@/lib/trafego/relatorio-anuncios-pdf";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 // GET /api/trafego/relatorio?de=AAAA-MM-DD&ate=AAAA-MM-DD[&formato=pdf] — planilha (.xlsx)
 // ou PDF com o custo de cada carro mês a mês.
+// Opções do PDF: secoes=numeros,objetivos,carros · conversas=0 · detalhe=0 · imposto=0
+// · situacoes=available,sold,fora,outros · minimo=100 · ordem=gasto|nome|custo|conversas
+// · inline=1 (abre na prévia em vez de baixar).
 // com resumo, por carro, por campanha, divisões, sem vínculo e dia a dia.
 // Sem datas = desde o início. Custo e lucro dos carros só para sócio.
 const DATA = /^\d{4}-\d{2}-\d{2}$/;
 const erro = (msg: string, status: number) => new Response(JSON.stringify({ erro: msg }), { status, headers: { "Content-Type": "application/json" } });
+
+const SITUACOES: GrupoSituacao[] = ["available", "sold", "fora", "outros"];
+const ORDENS: OrdemCarros[] = ["gasto", "nome", "custo", "conversas"];
+function lerOpcoes(q: URLSearchParams): OpcoesPdf {
+  const secoes = q.get("secoes")?.split(",") ?? null;
+  const nao = (k: string) => q.get(k) === "0";
+  const ordem = q.get("ordem") as OrdemCarros | null;
+  const minimo = Number(q.get("minimo"));
+  return {
+    numeros: !secoes || secoes.includes("numeros"),
+    objetivos: !secoes || secoes.includes("objetivos"),
+    carros: !secoes || secoes.includes("carros"),
+    conversas: !nao("conversas"), detalhe: !nao("detalhe"), imposto: !nao("imposto"),
+    situacoes: (q.get("situacoes")?.split(",") ?? []).filter((x): x is GrupoSituacao => SITUACOES.includes(x as GrupoSituacao)),
+    minimo: Number.isFinite(minimo) && minimo > 0 ? minimo : 0,
+    ordem: ordem && ORDENS.includes(ordem) ? ordem : "gasto",
+  };
+}
 
 export async function GET(req: Request) {
   const q = await quemNoPatio();
@@ -29,6 +50,8 @@ export async function GET(req: Request) {
   const ate = u.searchParams.get("ate") || "";
   if ((de && !DATA.test(de)) || (ate && !DATA.test(ate)) || (de && ate && de > ate)) return erro("período inválido", 400);
   const pdf = u.searchParams.get("formato") === "pdf";
+  const opcoes = lerOpcoes(u.searchParams);
+  const inline = u.searchParams.get("inline") === "1";
   const socio = q.papel === "socio";
   const admin = createAdminClient();
   try {
@@ -60,9 +83,9 @@ export async function GET(req: Request) {
     const agora = new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Bahia", dateStyle: "short", timeStyle: "short" }).format(new Date());
     const base = `relatorio-anuncios-ibox-${de || "inicio"}-a-${ate || new Intl.DateTimeFormat("en-CA", { timeZone: "America/Bahia" }).format(new Date())}`;
     if (pdf) {
-      const arquivo = await pdfRelatorio(r, { periodo, geradoEm: agora, campanhas: g.campanhas });
+      const arquivo = await pdfRelatorio(r, { periodo, geradoEm: agora, campanhas: g.campanhas, opcoes });
       return new Response(new Uint8Array(arquivo), {
-        headers: { "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${base}-por-carro-mes-a-mes.pdf"`, "Cache-Control": "no-store" },
+        headers: { "Content-Type": "application/pdf", "Content-Disposition": `${inline ? "inline" : "attachment"}; filename="${base}-por-carro-mes-a-mes.pdf"`, "Cache-Control": "no-store" },
       });
     }
     const arquivo = await planilhaRelatorio(r, { periodo, socio, geradoEm: agora });

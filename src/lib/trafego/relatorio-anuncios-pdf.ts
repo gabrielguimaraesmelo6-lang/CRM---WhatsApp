@@ -33,7 +33,9 @@ const r2 = (n: number) => Math.round(n * 100) / 100;
 const EXTRAS = new Set("€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ");
 const limpo = (s: string) => [...(s ?? "").normalize("NFC")].map((c) => { const k = c.codePointAt(0)!; return (k >= 32 && k < 127) || (k >= 160 && k <= 255) || EXTRAS.has(c) ? c : " "; }).join("").replace(/\s+/g, " ").trim();
 
-export type CarroMes = { chave: string; nome: string; placa: string; situacao: string; porMes: Record<string, number>; gasto: number; msgs: number };
+export type GrupoSituacao = "available" | "sold" | "fora" | "outros";
+export const grupoSituacao = (status: string): GrupoSituacao => (status === "available" || status === "sold" || status === "fora" ? status : "outros");
+export type CarroMes = { chave: string; nome: string; placa: string; situacao: string; grupo: GrupoSituacao; porMes: Record<string, number>; gasto: number; msgs: number };
 
 // Investimento que não foi para carro, separado por objetivo e agrupado.
 export const GRUPOS: { nome: string; chaves: string[] }[] = [
@@ -59,8 +61,11 @@ export function objetivoDaCampanha(c: Pick<CampanhaRel, "categoria_objetivo" | "
   return c.destino_id ? { chave: "destino", sugerido: false } : { chave: "sem", sugerido: false };
 }
 
-/** Custo de cada carro em cada mês (parte pura, testada). Tudo que não é carro vai para `semCarro`. */
-export function custoPorCarro(r: Relatorio, campanhas: CampanhaRel[] = []) {
+/**
+ * Custo de cada carro em cada mês (parte pura, testada). Tudo que não é carro vai para `semCarro`.
+ * `fator` = 1 com o imposto de 12% (como o painel); 1/1,12 = sem imposto (como o Gerenciador).
+ */
+export function custoPorCarro(r: Relatorio, campanhas: CampanhaRel[] = [], fator = 1) {
   const objetivo = new Map(campanhas.map((c) => [c.id, objetivoDaCampanha(c)]));
   const porObjetivo = new Map<string, { porMes: Record<string, number>; gasto: number; msgs: number }>();
   let gastoSugerido = 0;
@@ -68,7 +73,8 @@ export function custoPorCarro(r: Relatorio, campanhas: CampanhaRel[] = []) {
   const carros = new Map<string, CarroMes>();
   const semCarro = { porMes: {} as Record<string, number>, gasto: 0, msgs: 0 };
   const meses = new Set<string>();
-  for (const d of r.dias) {
+  for (const d0 of r.dias) {
+    const d = { ...d0, gasto: d0.gasto * fator };
     const mes = d.data.slice(0, 7);
     meses.add(mes);
     if (!d.carroId) {
@@ -87,6 +93,7 @@ export function custoPorCarro(r: Relatorio, campanhas: CampanhaRel[] = []) {
       nome: c?.nome ?? d.alvo,
       placa: c?.placa ?? "",
       situacao: c ? STATUS[c.status] ?? c.status : "",
+      grupo: grupoSituacao(c?.status ?? "fora"),
       porMes: {}, gasto: 0, msgs: 0,
     };
     x.porMes[mes] = (x.porMes[mes] ?? 0) + d.gasto;
@@ -101,7 +108,7 @@ export function custoPorCarro(r: Relatorio, campanhas: CampanhaRel[] = []) {
   const totalCarros = { porMes: Object.fromEntries(listaMeses.map((m) => [m, r2(lista.reduce((s, c) => s + (c.porMes[m] ?? 0), 0))])), gasto: r2(lista.reduce((s, c) => s + c.gasto, 0)), msgs: lista.reduce((s, c) => s + c.msgs, 0) };
   const sem = fecha(semCarro);
   // O total vem da conta (montarRelatorio), para bater centavo a centavo com o Excel e o painel.
-  const total = { porMes: Object.fromEntries(listaMeses.map((m) => [m, r2((totalCarros.porMes[m] ?? 0) + (sem.porMes[m] ?? 0))])), gasto: r.total.gasto, msgs: r.total.msgs };
+  const total = { porMes: Object.fromEntries(listaMeses.map((m) => [m, r2((totalCarros.porMes[m] ?? 0) + (sem.porMes[m] ?? 0))])), gasto: r2(r.total.gasto * fator), msgs: r.total.msgs };
   const soma = (xs: { porMes: Record<string, number>; gasto: number; msgs: number }[]) => fecha({ porMes: Object.fromEntries(listaMeses.map((m) => [m, xs.reduce((s, x) => s + (x.porMes[m] ?? 0), 0)])), gasto: xs.reduce((s, x) => s + x.gasto, 0), msgs: xs.reduce((s, x) => s + x.msgs, 0) });
   const objetivos = GRUPOS.map((g) => {
     const itens = g.chaves.filter((k) => porObjetivo.has(k)).map((k) => ({ chave: k, nome: rotuloObjetivo(k), ...fecha(porObjetivo.get(k)!) })).sort((a, b) => b.gasto - a.gasto);
@@ -110,7 +117,40 @@ export function custoPorCarro(r: Relatorio, campanhas: CampanhaRel[] = []) {
   return { meses: listaMeses, carros: lista, totalCarros, semCarro: sem, objetivos, gastoSugerido: r2(gastoSugerido), total };
 }
 
-export async function pdfRelatorio(r: Relatorio, o: { periodo: string; geradoEm: string; campanhas?: CampanhaRel[] }): Promise<Uint8Array> {
+export type OrdemCarros = "gasto" | "nome" | "custo" | "conversas";
+/** O que entra no PDF; tudo opcional (padrão = o relatório completo). */
+export type OpcoesPdf = {
+  numeros?: boolean; // cartões do topo
+  objetivos?: boolean; // investimento por objetivo, mês a mês
+  carros?: boolean; // custo de cada carro, mês a mês
+  conversas?: boolean; // colunas de conversas e custo por conversa
+  detalhe?: boolean; // detalhe dentro de cada objetivo (engajamento, visitas ao perfil…)
+  imposto?: boolean; // valores com os 12% (false = como o Gerenciador)
+  situacoes?: GrupoSituacao[]; // quais carros entram na lista (vazio = todos)
+  minimo?: number; // gasto mínimo do carro no período para entrar na lista
+  ordem?: OrdemCarros;
+};
+
+const NOME_SITUACAO: Record<GrupoSituacao, string> = { available: "à venda", sold: "vendidos", fora: "fora do Pátio", outros: "reservados, indisponíveis ou em revisão" };
+
+/** Aplica filtro e ordem das opções na lista de carros (parte pura, testada). */
+export function filtrarCarros(carros: CarroMes[], op: Pick<OpcoesPdf, "situacoes" | "minimo" | "ordem">) {
+  const sit = op.situacoes?.length ? new Set(op.situacoes) : null;
+  const lista = carros.filter((c) => (!sit || sit.has(c.grupo)) && c.gasto >= (op.minimo ?? 0));
+  const custo = (c: CarroMes) => (c.msgs > 0 ? c.gasto / c.msgs : Infinity);
+  const ordem = op.ordem ?? "gasto";
+  return [...lista].sort((a, b) =>
+    ordem === "nome" ? a.nome.localeCompare(b.nome, "pt-BR")
+      : ordem === "custo" ? custo(a) - custo(b) || b.gasto - a.gasto
+        : ordem === "conversas" ? b.msgs - a.msgs || b.gasto - a.gasto
+          : b.gasto - a.gasto);
+}
+
+export async function pdfRelatorio(r: Relatorio, o: { periodo: string; geradoEm: string; campanhas?: CampanhaRel[]; opcoes?: OpcoesPdf }): Promise<Uint8Array> {
+  const op: Required<Omit<OpcoesPdf, "situacoes" | "minimo">> & Pick<OpcoesPdf, "situacoes" | "minimo"> = {
+    numeros: true, objetivos: true, carros: true, conversas: true, detalhe: true, imposto: true, ordem: "gasto", ...o.opcoes,
+  };
+  if (!op.numeros && !op.objetivos && !op.carros) op.carros = true;
   const doc = await PDFDocument.create();
   doc.setTitle(`Custo de anúncio por carro, mês a mês — ${o.periodo}`);
   doc.setAuthor("Sistema iBox");
@@ -169,99 +209,121 @@ export async function pdfRelatorio(r: Relatorio, o: { periodo: string; geradoEm:
     });
     y -= 14;
   }
+  const tituloSecao = (t: string, sub: string) => {
+    if (y - 80 < M + 20) novaPagina();
+    texto(t, M, y - 13, { font: fb, size: 13 });
+    texto(sub, M, y - 26, { size: 8.5, cor: COR.mudo });
+    y -= 38;
+  };
 
-  const d = custoPorCarro(r, o.campanhas);
+  const d = custoPorCarro(r, o.campanhas, op.imposto ? 1 : 1 / 1.12);
+  const carros = filtrarCarros(d.carros, op);
+  const filtrado = carros.length !== d.carros.length;
+  const valores = op.imposto ? "com imposto de 12%" : "sem imposto (como no Gerenciador)";
 
-  // ---------- Cabeçalho e números ----------
+  // ---------- Cabeçalho ----------
   pg.drawRectangle({ x: 0, y: A4.h - 96, width: A4.w, height: 96, color: COR.preto });
   texto("iBox Prime Veículos", M, A4.h - 32, { size: 10, cor: COR.ouro, font: fb });
   texto("Custo de anúncio por carro, mês a mês", M, A4.h - 56, { size: 19, cor: COR.branco, font: fb });
-  texto(`Período: ${o.periodo}  ·  gerado em ${o.geradoEm} pelo Sistema iBox  ·  Meta (Facebook e Instagram), com imposto de 12%`, M, A4.h - 78, { size: 8.5, cor: rgb(0.78, 0.78, 0.78) });
+  texto(`Período: ${o.periodo}  ·  gerado em ${o.geradoEm} pelo Sistema iBox  ·  Meta (Facebook e Instagram), ${valores}`, M, A4.h - 78, { size: 8.5, cor: rgb(0.78, 0.78, 0.78) });
   y = A4.h - 114;
 
-  const grupo = (n: string) => d.objetivos.find((g) => g.nome === n);
-  const pct = (g: number) => (d.total.gasto ? `${((g / d.total.gasto) * 100).toFixed(0)}% do total` : "");
-  const kpis: [string, string, string][] = [
-    ["Investido no total", brl(d.total.gasto), `${num(d.total.msgs)} conversas · ${porConversa(d.total.gasto, d.total.msgs)} cada`],
-    ["Carros", brl(d.totalCarros.gasto), `${d.carros.length} carros · ${pct(d.totalCarros.gasto)}`],
-    ...(["Instagram", "Site", "Visibilidade"] as const).map((n): [string, string, string] => [n, brl(grupo(n)?.gasto ?? 0), pct(grupo(n)?.gasto ?? 0) || "—"]),
-  ];
-  const kw = LARGURA / kpis.length;
-  kpis.forEach(([rot, val, sub], i) => {
-    const x = M + i * kw;
-    pg.drawRectangle({ x: x + (i ? 4 : 0), y: y - 54, width: kw - 4, height: 54, borderColor: COR.linha, borderWidth: 0.8, color: COR.branco });
-    texto(rot, x + 12, y - 15, { size: 7.5, cor: COR.mudo });
-    texto(val, x + 12, y - 33, { size: 13, font: fb, cor: i === 0 ? COR.ouro : COR.tinta });
-    texto(sub, x + 12, y - 46, { size: 7, cor: COR.mudo });
-  });
-  y -= 74;
+  // ---------- Números ----------
+  if (op.numeros) {
+    const grupo = (n: string) => d.objetivos.find((g) => g.nome === n);
+    const pct = (g: number) => (d.total.gasto ? `${((g / d.total.gasto) * 100).toFixed(0)}% do total` : "");
+    const kpis: [string, string, string][] = [
+      ["Investido no total", brl(d.total.gasto), op.conversas ? `${num(d.total.msgs)} conversas · ${porConversa(d.total.gasto, d.total.msgs)} cada` : valores],
+      ["Carros", brl(d.totalCarros.gasto), `${d.carros.length} carros · ${pct(d.totalCarros.gasto)}`],
+      ...(["Instagram", "Site", "Visibilidade"] as const).map((n): [string, string, string] => [n, brl(grupo(n)?.gasto ?? 0), pct(grupo(n)?.gasto ?? 0) || "—"]),
+    ];
+    const kw = LARGURA / kpis.length;
+    kpis.forEach(([rot, val, sub], i) => {
+      const x = M + i * kw;
+      pg.drawRectangle({ x: x + (i ? 4 : 0), y: y - 54, width: kw - 4, height: 54, borderColor: COR.linha, borderWidth: 0.8, color: COR.branco });
+      texto(rot, x + 12, y - 15, { size: 7.5, cor: COR.mudo });
+      texto(val, x + 12, y - 33, { size: 13, font: fb, cor: i === 0 ? COR.ouro : COR.tinta });
+      texto(sub, x + 12, y - 46, { size: 7, cor: COR.mudo });
+    });
+    y -= 74;
+  }
 
   const grupos: string[][] = [];
   for (let i = 0; i < d.meses.length; i += MESES_POR_TABELA) grupos.push(d.meses.slice(i, i + MESES_POR_TABELA));
   if (!grupos.length) grupos.push([]);
   const v = (n: number | undefined) => (n ? brl(n) : "—");
+  const faixa = (ms: string[]) => (grupos.length > 1 && ms.length ? `: ${mesCurto(ms[0])} a ${mesCurto(ms[ms.length - 1])}` : ", mês a mês");
 
-  // ---------- Para onde foi: carros e cada objetivo, mês a mês ----------
-  grupos.forEach((ms, gi) => {
-    const ultimo = gi === grupos.length - 1;
+  // ---------- Investimento por objetivo ----------
+  if (op.objetivos) {
+    grupos.forEach((ms, gi) => {
+      const ultimo = gi === grupos.length - 1;
+      secao = "";
+      if (gi > 0) novaPagina();
+      const tit = `Investimento por objetivo${faixa(ms)}`;
+      tituloSecao(tit, "Carros e o que foi investido em cada objetivo sem carro: Instagram, site, visibilidade e os demais.");
+      secao = tit;
+      const cols: Col[] = [
+        { titulo: "Objetivo", w: 284 },
+        ...ms.map((m) => ({ titulo: mesCurto(m), w: 58, dir: true })),
+        ...(ultimo ? [{ titulo: "Total", w: 66, dir: true }, { titulo: "% do total", w: 52, dir: true }, ...(op.conversas ? [{ titulo: "Conversas", w: 52, dir: true }] : [])] : []),
+      ];
+      const resto = (x: { gasto: number; msgs: number }) => (ultimo ? [brl(x.gasto), d.total.gasto ? `${((x.gasto / d.total.gasto) * 100).toFixed(1).replace(".", ",")}%` : "—", ...(op.conversas ? [num(x.msgs)] : [])] : []);
+      const linhas: Linha[] = [{ cels: [`Carros (${d.carros.length})`, ...ms.map((m) => v(d.totalCarros.porMes[m])), ...resto(d.totalCarros)], negrito: true, fundo: true }];
+      for (const g of d.objetivos) {
+        const unico = g.itens.length === 1 && g.itens[0].nome === g.nome;
+        linhas.push({ cels: [g.nome, ...ms.map((m) => v(g.porMes[m])), ...resto(g)], negrito: true, fundo: true });
+        if (op.detalhe && !unico) for (const it of g.itens) linhas.push({ cels: [`     ${it.nome}`, ...ms.map((m) => v(it.porMes[m])), ...resto(it)] });
+      }
+      linhas.push({ cels: ["Total da conta", ...ms.map((m) => v(d.total.porMes[m])), ...resto(d.total)], negrito: true, fundo: true });
+      tabela(cols, linhas);
+    });
     secao = "";
-    if (gi > 0) novaPagina();
-    const tit = grupos.length > 1 && ms.length ? `Investimento por objetivo: ${mesCurto(ms[0])} a ${mesCurto(ms[ms.length - 1])}` : "Investimento por objetivo, mês a mês";
-    texto(tit, M, y - 13, { font: fb, size: 13 });
-    texto("Carros e o que foi investido em cada objetivo sem carro: Instagram, site, visibilidade e os demais.", M, y - 26, { size: 8.5, cor: COR.mudo });
-    y -= 38;
-    secao = tit;
-    const cols: Col[] = [
-      { titulo: "Objetivo", w: 284 },
-      ...ms.map((m) => ({ titulo: mesCurto(m), w: 58, dir: true })),
-      ...(ultimo ? [{ titulo: "Total", w: 66, dir: true }, { titulo: "% do total", w: 52, dir: true }, { titulo: "Conversas", w: 52, dir: true }] : []),
-    ];
-    const resto = (x: { gasto: number; msgs: number }) => (ultimo ? [brl(x.gasto), d.total.gasto ? `${((x.gasto / d.total.gasto) * 100).toFixed(1).replace(".", ",")}%` : "—", num(x.msgs)] : []);
-    const linhas: { cels: string[]; negrito?: boolean; fundo?: boolean; mudo?: boolean }[] = [
-      { cels: [`Carros (${d.carros.length})`, ...ms.map((m) => v(d.totalCarros.porMes[m])), ...resto(d.totalCarros)], negrito: true, fundo: true },
-    ];
-    for (const g of d.objetivos) {
-      const unico = g.itens.length === 1 && g.itens[0].nome === g.nome;
-      linhas.push({ cels: [g.nome, ...ms.map((m) => v(g.porMes[m])), ...resto(g)], negrito: true, fundo: true });
-      if (!unico) for (const it of g.itens) linhas.push({ cels: [`     ${it.nome}`, ...ms.map((m) => v(it.porMes[m])), ...resto(it)] });
+    if (d.gastoSugerido > 0) {
+      texto(`${brl(d.gastoSugerido)} são de campanhas sem finalidade escolhida no sistema, classificadas pelo objetivo do Meta e pelo nome. Para fixar, escolha a finalidade em Ligar campanhas.`, M, y + 4, { size: 7.5, cor: COR.mudo });
+      y -= 12;
     }
-    linhas.push({ cels: ["Total da conta", ...ms.map((m) => v(d.total.porMes[m])), ...resto(d.total)], negrito: true, fundo: true });
-    tabela(cols, linhas);
-  });
-  if (d.gastoSugerido > 0) {
-    texto(`${brl(d.gastoSugerido)} são de campanhas sem finalidade escolhida no sistema, classificadas pelo objetivo do Meta e pelo nome. Para fixar, escolha a finalidade em Ligar campanhas.`, M, y + 4, { size: 7.5, cor: COR.mudo });
-    y -= 12;
   }
 
-  // ---------- Tabela carro × mês ----------
-  secao = "";
-  novaPagina();
-  grupos.forEach((ms, gi) => {
-    const ultimo = gi === grupos.length - 1;
+  // ---------- Custo de cada carro ----------
+  if (op.carros) {
+    const ordemTxt: Record<OrdemCarros, string> = { gasto: "do que mais recebeu anúncio para o que menos recebeu", nome: "em ordem alfabética", custo: "do menor para o maior custo por conversa", conversas: "do que mais gerou conversas para o que menos gerou" };
+    const filtroTxt = [
+      op.situacoes?.length ? `só carros ${op.situacoes.map((s) => NOME_SITUACAO[s]).join(", ")}` : "",
+      op.minimo ? `com pelo menos ${brl(op.minimo)} no período` : "",
+    ].filter(Boolean).join(", ");
+    grupos.forEach((ms, gi) => {
+      const ultimo = gi === grupos.length - 1;
+      secao = "";
+      if (gi > 0 || op.numeros || op.objetivos) novaPagina();
+      const tit = `Custo por carro${faixa(ms)}`;
+      tituloSecao(tit, `Uma linha por carro, ${ordemTxt[op.ordem]}. Todas as campanhas do carro somadas.${filtrado ? ` Mostrando ${carros.length} de ${d.carros.length} carros (${filtroTxt}).` : ""}`);
+      secao = tit;
+      const cols: Col[] = [
+        { titulo: "Carro", w: 170 }, { titulo: "Placa", w: 50 }, { titulo: "Situação", w: 64 },
+        ...ms.map((m) => ({ titulo: mesCurto(m), w: 58, dir: true })),
+        ...(ultimo ? [{ titulo: "Total", w: 66, dir: true }, ...(op.conversas ? [{ titulo: "Conversas", w: 52, dir: true }, { titulo: "R$/conversa", w: 58, dir: true }] : [])] : []),
+      ];
+      const resto = (x: { gasto: number; msgs: number }) => (ultimo ? [brl(x.gasto), ...(op.conversas ? [num(x.msgs), porConversa(x.gasto, x.msgs)] : [])] : []);
+      const soma = { porMes: Object.fromEntries(ms.map((m) => [m, r2(carros.reduce((s, c) => s + (c.porMes[m] ?? 0), 0))])), gasto: r2(carros.reduce((s, c) => s + c.gasto, 0)), msgs: carros.reduce((s, c) => s + c.msgs, 0) };
+      const linhas: Linha[] = carros.map((c) => ({ cels: [c.nome, c.placa, c.situacao, ...ms.map((m) => v(c.porMes[m])), ...resto(c)] }));
+      if (!carros.length) linhas.push({ cels: ["Nenhum carro com esses filtros no período.", "", "", ...ms.map(() => ""), ...(ultimo ? resto({ gasto: 0, msgs: 0 }).map(() => "") : [])], mudo: true });
+      if (filtrado) {
+        linhas.push({ cels: [`Total dos ${carros.length} carros listados`, "", "", ...ms.map((m) => v(soma.porMes[m])), ...resto(soma)], negrito: true, fundo: true });
+        linhas.push({ cels: [`Todos os carros (${d.carros.length})`, "", "", ...ms.map((m) => v(d.totalCarros.porMes[m])), ...resto(d.totalCarros)], mudo: true });
+      } else {
+        linhas.push({ cels: ["Total em carros", "", "", ...ms.map((m) => v(d.totalCarros.porMes[m])), ...resto(d.totalCarros)], negrito: true, fundo: true });
+      }
+      linhas.push({ cels: ["Anúncios sem carro (Instagram, site…)", "", "", ...ms.map((m) => v(d.semCarro.porMes[m])), ...resto(d.semCarro)], mudo: true });
+      linhas.push({ cels: ["Total da conta", "", "", ...ms.map((m) => v(d.total.porMes[m])), ...resto(d.total)], negrito: true, fundo: true });
+      tabela(cols, linhas);
+    });
     secao = "";
-    if (gi > 0) novaPagina();
-    const tit = grupos.length > 1 && ms.length ? `Custo por carro: ${mesCurto(ms[0])} a ${mesCurto(ms[ms.length - 1])}` : "Custo por carro, mês a mês";
-    texto(tit, M, y - 13, { font: fb, size: 13 });
-    texto("Uma linha por carro, do que mais recebeu anúncio para o que menos recebeu. Todas as campanhas do carro somadas.", M, y - 26, { size: 8.5, cor: COR.mudo });
-    y -= 38;
-    secao = tit;
-    const cols: Col[] = [
-      { titulo: "Carro", w: 170 }, { titulo: "Placa", w: 50 }, { titulo: "Situação", w: 64 },
-      ...ms.map((m) => ({ titulo: mesCurto(m), w: 58, dir: true })),
-      ...(ultimo ? [{ titulo: "Total", w: 66, dir: true }, { titulo: "Conversas", w: 52, dir: true }, { titulo: "R$/conversa", w: 58, dir: true }] : []),
-    ];
-    const resto = (x: { gasto: number; msgs: number }) => (ultimo ? [brl(x.gasto), num(x.msgs), porConversa(x.gasto, x.msgs)] : []);
-    tabela(cols, [
-      ...d.carros.map((c) => ({ cels: [c.nome, c.placa, c.situacao, ...ms.map((m) => v(c.porMes[m])), ...resto(c)] })),
-      { cels: ["Total em carros", "", "", ...ms.map((m) => v(d.totalCarros.porMes[m])), ...resto(d.totalCarros)], negrito: true, fundo: true },
-      { cels: ["Anúncios sem carro (ver por objetivo)", "", "", ...ms.map((m) => v(d.semCarro.porMes[m])), ...resto(d.semCarro)], mudo: true },
-      { cels: ["Total da conta", "", "", ...ms.map((m) => v(d.total.porMes[m])), ...resto(d.total)], negrito: true, fundo: true },
-    ]);
-  });
-  secao = "";
+  }
+
   if (y < M + 50) novaPagina();
   texto("Cada carro soma todas as campanhas dele e a parte dele nas campanhas divididas entre vários carros. “Fora do Pátio”: cadastro antigo do Marketing ainda não ligado a um carro do Pátio.", M, y, { size: 7.5, cor: COR.mudo });
-  texto("“Anúncios sem carro”: Instagram, site, visibilidade e os outros objetivos, separados na tabela por objetivo. Valores com o imposto de 12% do Meta.", M, y - 10, { size: 7.5, cor: COR.mudo });
+  texto(`Valores ${valores}. Gasto do Meta conferido pelo Sistema iBox.`, M, y - 10, { size: 7.5, cor: COR.mudo });
 
   const paginas = doc.getPages();
   paginas.forEach((p, i) => {

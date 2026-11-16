@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { BaixarRelatorioAnuncios } from "@/components/trafego/baixar-relatorio";
+import { CustoPorCarro } from "./custo-carros";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { brl } from "../patio/comum";
@@ -49,6 +49,25 @@ function variacao(atual: number, antes: number | undefined) {
 }
 
 export default function ResultadosPage() {
+  const [tipo, setTipo] = useState<"carros" | "loja">("carros");
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+        <div>
+          <div className="rot" style={{ fontSize: 13 }}>Relatórios · iBox Prime</div>
+          <h1 className="disp" style={{ margin: "2px 0 0", fontSize: 30, lineHeight: 1.1 }}>{tipo === "carros" ? "Custo de anúncio por carro" : "Resultado da loja"}</h1>
+        </div>
+        <div className="seg" role="group" aria-label="Tipo de relatório">
+          <button type="button" aria-pressed={tipo === "carros"} onClick={() => setTipo("carros")}>Custo por carro e objetivo</button>
+          <button type="button" aria-pressed={tipo === "loja"} onClick={() => setTipo("loja")}>Resultado da loja</button>
+        </div>
+      </div>
+      {tipo === "carros" ? <CustoPorCarro /> : <ResultadoDaLoja />}
+    </div>
+  );
+}
+
+function ResultadoDaLoja() {
   const hoje = new Date();
   const [de, setDe] = useState(iso(new Date(hoje.getTime() - 29 * 86_400_000)));
   const [ate, setAte] = useState(iso(hoje));
@@ -83,7 +102,7 @@ export default function ResultadosPage() {
 
   useEffect(() => {
     createClient().from("relatorio_modelos").select("id, nome, config").order("criado_em")
-      .then(({ data }) => setModelos((data ?? []) as Modelo[]));
+      .then(({ data }) => setModelos(((data ?? []) as (Modelo & { config: { tipo?: string } })[]).filter((m) => m.config?.tipo !== "carros")));
   }, []);
 
   const campanhas = useMemo(
@@ -118,10 +137,12 @@ export default function ResultadosPage() {
           <label className="campo">Até<input type="date" value={ateTxt} min={de} onChange={(e) => { const v = e.target.value; setAteTxt(v); if (dataValida(v) && v >= de) setAte(v); }} /></label>
         </div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          <button type="button" className="chip" onClick={() => periodo(iso(new Date(hoje.getFullYear(), hoje.getMonth(), 1)), iso(hoje))}>Este mês</button>
           {[[7, "7 dias"], [30, "30 dias"], [90, "90 dias"]].map(([n, nome]) => (
             <button key={n} type="button" className="chip" onClick={() => periodo(iso(new Date(hoje.getTime() - (Number(n) - 1) * 86_400_000)), iso(hoje))}>{nome}</button>
           ))}
           <button type="button" className="chip" onClick={() => { const a = new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1); const b = new Date(hoje.getFullYear(), hoje.getMonth(), 0); periodo(iso(a), iso(b)); }}>Mês passado</button>
+          <button type="button" className="chip" onClick={() => periodo(iso(new Date(hoje.getFullYear(), 0, 1)), iso(hoje))}>Este ano</button>
         </div>
         <fieldset style={{ border: 0, margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 8 }}>
           <legend className="rot" style={{ marginBottom: 6 }}>Seções</legend>
@@ -137,8 +158,7 @@ export default function ResultadosPage() {
         <label style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 14 }}><input type="checkbox" checked={cfg.comparar} onChange={() => setCfg({ ...cfg, comparar: !cfg.comparar })} /> Comparar com o período anterior</label>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button type="button" className="btns" onClick={salvarModelo}>Salvar como modelo</button>
-          <button type="button" className="btnp" onClick={() => window.print()}>Baixar PDF</button>
-          {r && r.papel !== "vendedor" && <BaixarRelatorioAnuncios classeBotao="btns" />}
+          <button type="button" className="btnp" onClick={() => window.print()}>Imprimir ou salvar em PDF</button>
         </div>
         {modelos.length > 0 && (
           <div className="rot" style={{ fontSize: 13 }}>

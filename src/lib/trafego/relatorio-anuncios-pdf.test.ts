@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { montarRelatorio } from "./relatorio-anuncios";
-import { custoPorCarro, objetivoDaCampanha, pdfRelatorio } from "./relatorio-anuncios-pdf";
+import { custoPorCarro, filtrarCarros, objetivoDaCampanha, pdfRelatorio } from "./relatorio-anuncios-pdf";
 
 const base = { status: "ACTIVE", categoria_objetivo: null, destino_id: null, divisao: null };
 const rel = montarRelatorio({
@@ -58,5 +58,26 @@ describe("objetivoDaCampanha com link de destino", () => {
   it("campanha de Instagram ligada a um link vai para Instagram; sem pista, fica como link", () => {
     expect(objetivoDaCampanha({ nome: "25/10 | Engajamento Insta", categoria_objetivo: null, destino_id: "d1", objetivo: "OUTCOME_ENGAGEMENT" })).toEqual({ chave: "perfil_engajamento", sugerido: true });
     expect(objetivoDaCampanha({ nome: "Promo", categoria_objetivo: null, destino_id: "d1", objetivo: "OUTCOME_SALES" })).toEqual({ chave: "destino", sugerido: false });
+  });
+});
+
+describe("opções do PDF", () => {
+  it("sem imposto divide tudo por 1,12 e o total bate com o Gerenciador", () => {
+    const d = custoPorCarro(rel, [], 1 / 1.12);
+    expect(d.total.gasto).toBe(rel.total.bruto);
+    expect(d.carros[1].porMes["2026-10"]).toBe(100);
+  });
+
+  it("filtra carros por situação e gasto mínimo, e ordena", () => {
+    const d = custoPorCarro(rel);
+    expect(filtrarCarros(d.carros, { situacoes: ["available"] }).map((c) => c.grupo)).toEqual(["available"]);
+    expect(filtrarCarros(d.carros, { minimo: 200 }).map((c) => c.nome)).toEqual(["Hilux SRX · XYZ9A88"]);
+    expect(filtrarCarros(d.carros, { ordem: "nome" }).map((c) => c.nome)).toEqual(["Hilux SRX · XYZ9A88", "Toyota Corolla Altis"]);
+    expect(filtrarCarros(d.carros, { ordem: "custo" })[0].nome).toBe("Toyota Corolla Altis");
+  });
+
+  it("gera o PDF só com as partes escolhidas", async () => {
+    const b = await pdfRelatorio(rel, { periodo: "x", geradoEm: "y", opcoes: { numeros: false, objetivos: false, conversas: false, imposto: false, situacoes: ["sold"] } });
+    expect(Buffer.from(b.slice(0, 5)).toString()).toBe("%PDF-");
   });
 });
