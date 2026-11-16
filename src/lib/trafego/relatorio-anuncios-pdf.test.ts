@@ -53,3 +53,10 @@ describe("objetivoDaCampanha", () => {
     expect(d.objetivos[0]).toMatchObject({ nome: "Instagram", gasto: 11.2, itens: [{ chave: "perfil_engajamento", nome: "Engajamento", gasto: 11.2 }] });
   });
 });
+
+describe("objetivoDaCampanha com link de destino", () => {
+  it("campanha de Instagram ligada a um link vai para Instagram; sem pista, fica como link", () => {
+    expect(objetivoDaCampanha({ nome: "25/10 | Engajamento Insta", categoria_objetivo: null, destino_id: "d1", objetivo: "OUTCOME_ENGAGEMENT" })).toEqual({ chave: "perfil_engajamento", sugerido: true });
+    expect(objetivoDaCampanha({ nome: "Promo", categoria_objetivo: null, destino_id: "d1", objetivo: "OUTCOME_SALES" })).toEqual({ chave: "destino", sugerido: false });
+  });
+});

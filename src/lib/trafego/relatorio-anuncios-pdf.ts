@@ -52,9 +52,11 @@ export const rotuloObjetivo = (k: string) => ROTULO_ITEM[k] ?? rotuloFinalidade(
  */
 export function objetivoDaCampanha(c: Pick<CampanhaRel, "categoria_objetivo" | "destino_id" | "nome"> & { objetivo?: string | null }): { chave: string; sugerido: boolean } {
   if (c.categoria_objetivo) return { chave: GRUPOS.some((g) => g.chaves.includes(c.categoria_objetivo!)) ? c.categoria_objetivo : "outro", sugerido: false };
-  if (c.destino_id) return { chave: "destino", sugerido: false };
+  // Ligada só a um link de destino (perfil, site…): o link não diz o objetivo, então
+  // vale a sugestão pelo objetivo do Meta e pelo nome; sem sugestão, fica como link.
   const s = sugerirFinalidade(c.objetivo, c.nome || "");
-  return s ? { chave: s, sugerido: true } : { chave: "sem", sugerido: false };
+  if (s) return { chave: s, sugerido: true };
+  return c.destino_id ? { chave: "destino", sugerido: false } : { chave: "sem", sugerido: false };
 }
 
 /** Custo de cada carro em cada mês (parte pura, testada). Tudo que não é carro vai para `semCarro`. */
@@ -227,7 +229,7 @@ export async function pdfRelatorio(r: Relatorio, o: { periodo: string; geradoEm:
     tabela(cols, linhas);
   });
   if (d.gastoSugerido > 0) {
-    texto(`${brl(d.gastoSugerido)} são de campanhas ainda sem vínculo no sistema, classificadas pelo objetivo do Meta e pelo nome. Confirme em Ligar campanhas.`, M, y + 4, { size: 7.5, cor: COR.mudo });
+    texto(`${brl(d.gastoSugerido)} são de campanhas sem finalidade escolhida no sistema, classificadas pelo objetivo do Meta e pelo nome. Para fixar, escolha a finalidade em Ligar campanhas.`, M, y + 4, { size: 7.5, cor: COR.mudo });
     y -= 12;
   }
 
