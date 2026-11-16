@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { montarRelatorio } from "./relatorio-anuncios";
-import { custoPorMes, pdfRelatorio } from "./relatorio-anuncios-pdf";
+import { custoPorCarro, pdfRelatorio } from "./relatorio-anuncios-pdf";
 
 const base = { status: "ACTIVE", categoria_objetivo: null, destino_id: null, divisao: null };
 const rel = montarRelatorio({
@@ -20,16 +20,16 @@ const rel = montarRelatorio({
   veiculos: [{ id: "v1", modelo: "Corolla", placa: null, site_vehicle_id: "p1" }, { id: "v2", modelo: "Hilux SRX", placa: "XYZ9A88", site_vehicle_id: null }],
 });
 
-describe("custoPorMes", () => {
-  it("separa cada carro em cada mês, com imposto, e fecha com o total da conta", () => {
-    const m = custoPorMes(rel);
-    expect(m.map((x) => x.mes)).toEqual(["2026-10", "2026-11"]);
-    expect(m[0].carros).toHaveLength(1);
-    expect(m[0].carros[0]).toMatchObject({ nome: "Toyota Corolla Altis", situacao: "À venda", gasto: 112, msgs: 10 });
-    expect(m[1].carros.map((c) => c.nome)).toEqual(["Hilux SRX · XYZ9A88 (fora do Pátio)", "Toyota Corolla Altis"]);
-    expect(m[1].outros[0]).toMatchObject({ situacao: "Finalidade", gasto: 11.2 });
-    const soma = m.reduce((s, x) => s + x.gasto, 0);
-    expect(Math.round(soma * 100) / 100).toBe(rel.total.gasto);
+describe("custoPorCarro", () => {
+  it("uma linha por carro com o custo de cada mês, somando as campanhas, e fecha com o total da conta", () => {
+    const d = custoPorCarro(rel);
+    expect(d.meses).toEqual(["2026-10", "2026-11"]);
+    expect(d.carros.map((c) => c.nome)).toEqual(["Hilux SRX · XYZ9A88", "Toyota Corolla Altis"]);
+    expect(d.carros[0].situacao).toBe("Fora do Pátio");
+    expect(d.carros[1]).toMatchObject({ situacao: "À venda", placa: "ABC1D23", porMes: { "2026-10": 112, "2026-11": 56 }, gasto: 168, msgs: 15 });
+    expect(d.semCarro).toMatchObject({ porMes: { "2026-11": 11.2 }, gasto: 11.2 });
+    expect(d.total.gasto).toBe(rel.total.gasto);
+    expect(d.total.porMes["2026-11"]).toBe(291.2);
   });
 
   it("gera um PDF válido, mesmo com nomes fora do alfabeto latino", async () => {
