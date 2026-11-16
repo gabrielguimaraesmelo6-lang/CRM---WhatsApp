@@ -38,6 +38,9 @@ const STATUS_PT: Record<string, string> = { available: "À venda", reserved: "Re
 const minutos = (m: number | null | undefined) => (m == null ? "—" : m < 60 ? `${Math.round(m)} min` : m < 1440 ? `${(m / 60).toFixed(1).replace(".", ",")} h` : `${(m / 1440).toFixed(1).replace(".", ",")} dias`);
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 const IMPOSTO = 1.12;
+// Enquanto a pessoa digita, o campo de data passa por valores vazios ou com
+// ano incompleto ("0002-…"). Só uma data inteira e plausível vira filtro.
+const dataValida = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s) && Number(s.slice(0, 4)) >= 2000 && !Number.isNaN(Date.parse(s));
 
 function variacao(atual: number, antes: number | undefined) {
   if (antes == null || !antes) return null;
@@ -49,6 +52,10 @@ export default function ResultadosPage() {
   const hoje = new Date();
   const [de, setDe] = useState(iso(new Date(hoje.getTime() - 29 * 86_400_000)));
   const [ate, setAte] = useState(iso(hoje));
+  // O que está escrito nos campos; de/ate só mudam quando a data está completa.
+  const [deTxt, setDeTxt] = useState(de);
+  const [ateTxt, setAteTxt] = useState(ate);
+  const periodo = (a: string, b: string) => { setDe(a); setAte(b); setDeTxt(a); setAteTxt(b); };
   const [cfg, setCfg] = useState<Config>(PADRAO);
   const [r, setR] = useState<Resumo | null>(null);
   const [antes, setAntes] = useState<Resumo | null>(null);
@@ -65,6 +72,7 @@ export default function ResultadosPage() {
 
   useEffect(() => {
     let vivo = true;
+    if (!dataValida(de) || !dataValida(ate) || de > ate) return;
     const ini = Date.parse(de), fim = Date.parse(ate);
     const dur = fim - ini + 86_400_000;
     Promise.all([buscar(de, ate), buscar(iso(new Date(ini - dur)), iso(new Date(ini - 86_400_000)))])
@@ -106,14 +114,14 @@ export default function ResultadosPage() {
       <aside className="card relatorio-filtros" aria-labelledby="montar-t" style={{ flex: "1 1 250px", maxWidth: 290, padding: 18, display: "flex", flexDirection: "column", gap: 14 }}>
         <h2 id="montar-t" className="h2">Montar relatório</h2>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-          <label className="campo">De<input type="date" value={de} max={ate} onChange={(e) => setDe(e.target.value)} /></label>
-          <label className="campo">Até<input type="date" value={ate} min={de} onChange={(e) => setAte(e.target.value)} /></label>
+          <label className="campo">De<input type="date" value={deTxt} max={ate} onChange={(e) => { const v = e.target.value; setDeTxt(v); if (dataValida(v) && v <= ate) setDe(v); }} /></label>
+          <label className="campo">Até<input type="date" value={ateTxt} min={de} onChange={(e) => { const v = e.target.value; setAteTxt(v); if (dataValida(v) && v >= de) setAte(v); }} /></label>
         </div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           {[[7, "7 dias"], [30, "30 dias"], [90, "90 dias"]].map(([n, nome]) => (
-            <button key={n} type="button" className="chip" onClick={() => { setAte(iso(hoje)); setDe(iso(new Date(hoje.getTime() - (Number(n) - 1) * 86_400_000))); }}>{nome}</button>
+            <button key={n} type="button" className="chip" onClick={() => periodo(iso(new Date(hoje.getTime() - (Number(n) - 1) * 86_400_000)), iso(hoje))}>{nome}</button>
           ))}
-          <button type="button" className="chip" onClick={() => { const a = new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1); const b = new Date(hoje.getFullYear(), hoje.getMonth(), 0); setDe(iso(a)); setAte(iso(b)); }}>Mês passado</button>
+          <button type="button" className="chip" onClick={() => { const a = new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1); const b = new Date(hoje.getFullYear(), hoje.getMonth(), 0); periodo(iso(a), iso(b)); }}>Mês passado</button>
         </div>
         <fieldset style={{ border: 0, margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 8 }}>
           <legend className="rot" style={{ marginBottom: 6 }}>Seções</legend>

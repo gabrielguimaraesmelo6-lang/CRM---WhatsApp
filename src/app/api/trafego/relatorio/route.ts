@@ -8,11 +8,13 @@ import { fetchAll } from "@/lib/trafego/fetchAll";
 import { carregarGastoPorCarro } from "@/lib/trafego/gasto-carro";
 import { montarRelatorio, type CarroRel, type VeiculoRel } from "@/lib/trafego/relatorio-anuncios";
 import { planilhaRelatorio } from "@/lib/trafego/relatorio-anuncios-xlsx";
+import { pdfRelatorio } from "@/lib/trafego/relatorio-anuncios-pdf";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-// GET /api/trafego/relatorio?de=AAAA-MM-DD&ate=AAAA-MM-DD — planilha (.xlsx)
+// GET /api/trafego/relatorio?de=AAAA-MM-DD&ate=AAAA-MM-DD[&formato=pdf] — planilha (.xlsx)
+// ou PDF com o custo de cada carro mês a mês.
 // com resumo, por carro, por campanha, divisões, sem vínculo e dia a dia.
 // Sem datas = desde o início. Custo e lucro dos carros só para sócio.
 const DATA = /^\d{4}-\d{2}-\d{2}$/;
@@ -26,6 +28,7 @@ export async function GET(req: Request) {
   const de = u.searchParams.get("de") || "";
   const ate = u.searchParams.get("ate") || "";
   if ((de && !DATA.test(de)) || (ate && !DATA.test(ate)) || (de && ate && de > ate)) return erro("período inválido", 400);
+  const pdf = u.searchParams.get("formato") === "pdf";
   const socio = q.papel === "socio";
   const admin = createAdminClient();
   try {
@@ -55,12 +58,18 @@ export async function GET(req: Request) {
     const fmt = (d: string) => d.split("-").reverse().join("/");
     const periodo = de || ate ? `${de ? fmt(de) : "início"} a ${ate ? fmt(ate) : "hoje"}` : "desde o início";
     const agora = new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Bahia", dateStyle: "short", timeStyle: "short" }).format(new Date());
+    const base = `relatorio-anuncios-ibox-${de || "inicio"}-a-${ate || new Intl.DateTimeFormat("en-CA", { timeZone: "America/Bahia" }).format(new Date())}`;
+    if (pdf) {
+      const arquivo = await pdfRelatorio(r, { periodo, geradoEm: agora });
+      return new Response(new Uint8Array(arquivo), {
+        headers: { "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${base}-por-carro-mes-a-mes.pdf"`, "Cache-Control": "no-store" },
+      });
+    }
     const arquivo = await planilhaRelatorio(r, { periodo, socio, geradoEm: agora });
-    const nome = `relatorio-anuncios-ibox-${de || "inicio"}-a-${ate || new Intl.DateTimeFormat("en-CA", { timeZone: "America/Bahia" }).format(new Date())}.xlsx`;
     return new Response(new Uint8Array(arquivo), {
       headers: {
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "Content-Disposition": `attachment; filename="${nome}"`,
+        "Content-Disposition": `attachment; filename="${base}.xlsx"`,
         "Cache-Control": "no-store",
       },
     });

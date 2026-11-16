@@ -23,6 +23,7 @@ type Resumo = {
 type Periodo = "hoje" | "ontem" | "7" | "30" | "90" | "mes" | "mesPassado" | "ano" | "datas";
 const PERIODOS: [Periodo, string][] = [["hoje", "Hoje"], ["ontem", "Ontem"], ["7", "7 dias"], ["30", "30 dias"], ["90", "90 dias"], ["mes", "Este mês"], ["mesPassado", "Mês passado"], ["ano", "Este ano"], ["datas", "Escolher datas"]];
 const isoBahia = (d: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Bahia" }).format(d);
+const completa = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s) && Number(s.slice(0, 4)) >= 2000;
 function intervalo(p: Periodo, de: string, ate: string): { de: string; ate: string } | null {
   const hoje = new Date(isoBahia(new Date()) + "T12:00:00Z");
   const menos = (n: number) => { const d = new Date(hoje); d.setUTCDate(d.getUTCDate() - n); return isoBahia(d); };
@@ -36,7 +37,8 @@ function intervalo(p: Periodo, de: string, ate: string): { de: string; ate: stri
     case "mes": return { de: isoBahia(new Date(Date.UTC(y, m, 1, 12))), ate: menos(0) };
     case "mesPassado": return { de: isoBahia(new Date(Date.UTC(y, m - 1, 1, 12))), ate: isoBahia(new Date(Date.UTC(y, m, 0, 12))) };
     case "ano": return { de: `${y}-01-01`, ate: menos(0) };
-    case "datas": return de && ate && de <= ate ? { de, ate } : null;
+    // Só datas inteiras: enquanto digita, o ano passa por "0002", "0020"…
+    case "datas": return completa(de) && completa(ate) && de <= ate ? { de, ate } : null;
   }
 }
 const dataBr = (d: string) => d.split("-").reverse().join("/");
